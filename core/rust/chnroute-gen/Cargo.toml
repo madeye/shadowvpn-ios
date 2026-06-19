@@ -1,0 +1,14 @@
+[package]
+name = "chnroute-gen"
+version = "0.1.0"
+edition = "2021"
+description = "One-shot converter: MaxMind GeoLite2 Country mmdb -> static chnroute.txt (CN CIDRs)."
+
+[[bin]]
+name = "chnroute-gen"
+path = "src/main.rs"
+
+[dependencies]
+maxminddb = "0.28.1"
+ipnetwork = "0.21.1"
+anyhow = "1.0"

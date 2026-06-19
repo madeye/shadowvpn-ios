@@ -1,0 +1,73 @@
+[package]
+name = "shadowvpn-ios-ffi"
+version = "0.1.0"
+edition = "2021"
+description = "ShadowVPN iOS data plane — C ABI over the shadowsocks AEAD UDP wire scheme. No tun-rs, no Go, no JNI: the NetworkExtension owns NEPacketTunnelFlow and feeds raw IP packets across this boundary."
+
+[lib]
+# `staticlib` is the only consumer we ship: the iOS xcframework links
+# `libshadowvpn_ios_ffi.a` into the app and the PacketTunnel extension. There is
+# no rlib sibling (meow keeps one for a utun harness; ShadowVPN's data plane is
+# small enough that the host `cargo test` exercises it directly via the
+# vendored modules, which are plain `pub mod`s reachable from the test harness).
+crate-type = ["staticlib"]
+
+[lints.rust]
+unsafe_code = "allow"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+needless_return = "allow"
+
+[dependencies]
+# Async runtime. We only need the multi-thread scheduler, UDP sockets, timers
+# (keepalive ticker), sync primitives, and the bounded mpsc the ingest path
+# uses. No `signal`/`process`/`fs` — the NE owns the process lifecycle.
+tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "sync", "time", "macros"] }
+parking_lot = "0.12"
+
+# Logging. `oslog` bridges `log` onto the Apple unified log (os_log) exactly as
+# meow-ios does, so NE lifecycle + data-plane events land in Console / `log
+# stream`. `log` is the façade the bridge writes through.
+log = "0.4"
+oslog = { version = "0.2", default-features = false, features = ["logger"] }
+
+# Config JSON (svpn_tun_start's `config_json`) and the cipher/mode enums.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# --- Vendored shadowvpn crypto/dns dependency set ------------------------
+# These mirror upstream madeye/shadowvpn `Cargo.toml` exactly so the vendored
+# `crypto.rs` / `dns.rs` / `chnroute.rs` / `protocol.rs` compile unmodified.
+# AEAD ciphers (RustCrypto). The 0.11 line shares the `aead` 0.6 traits.
+aead = { version = "0.6", features = ["alloc"] }
+aes-gcm = { version = "0.11.0-rc.4", features = ["alloc"] }
+chacha20poly1305 = { version = "0.11.0-rc.3", features = ["alloc"] }
+# Key derivation: HKDF-SHA1 subkeys + MD5-based EVP_BytesToKey master key.
+hkdf = "0.13"
+sha1 = "0.11"
+md-5 = "0.11"
+# Per-datagram random salt.
+rand = "0.10"
+# Error handling for the vendored crypto module.
+thiserror = "2.0"
+
+# Low-level FFI glue + mach RSS sampling.
+libc = "0.2"
+
+[build-dependencies]
+# Emits include/shadowvpn_core.h from the `#[no_mangle]` C ABI in `lib.rs`.
+cbindgen = "0.28"
+
+[profile.release]
+# Shrink the static lib for the 50 MB NetworkExtension budget. This crate is
+# tiny next to meow's (no lwIP, no embedded proxy engine), but the same knobs
+# apply: size-optimized codegen + full LTO + a single codegen unit + symbol
+# stripping. `panic = "abort"` drops the unwinder — a panic on an FFI thread
+# can't unwind across the C boundary safely anyway, so we abort (the panic hook
+# logs the message to os_log first).
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = "symbols"
+panic = "abort"

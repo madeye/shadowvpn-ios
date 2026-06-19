@@ -1,0 +1,7 @@
+--swiftversion 6.2
+
+--exclude .build
+--exclude build
+--exclude SVPNShared/.build
+--exclude SVPNShared/.swiftpm
+--exclude ShadowVPNCore/Frameworks

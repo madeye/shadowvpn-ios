@@ -1,0 +1,220 @@
+name: shadowvpn-ios
+
+# ---------------------------------------------------------------------------
+# XcodeGen spec for the ShadowVPN iOS client.
+#
+# Three first-party targets:
+#   * shadowvpn-ios   — the SwiftUI app shell
+#   * PacketTunnel    — the NEPacketTunnelProvider app-extension (ObjC SV* driver)
+#   * SVPNShared      — a local SPM package (products: SVPNModels + SVPNIPC)
+#
+# Both the app and the extension link the Rust core (ShadowVPNCore.xcframework,
+# built by scripts/build-rust.sh). The framework is marked `optional: true` so a
+# fresh checkout can `xcodegen generate` before the xcframework exists — the
+# integrate phase builds the Rust lib first, then regenerates.
+#
+# No Firebase, no Yams, no subscriptions — ShadowVPN is a small PSK UDP tunnel.
+# ---------------------------------------------------------------------------
+
+options:
+  bundleIdPrefix: com.tangzixiang.shadowvpn
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+  generateEmptyDirectories: true
+  groupSortPosition: top
+  xcodeVersion: "26.0"
+
+# Pull DEVELOPMENT_TEAM (and any other local-only overrides) from the gitignored
+# Local.xcconfig so the committed spec never carries a team id.
+configFiles:
+  Debug: Local.xcconfig
+  Release: Local.xcconfig
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+    TARGETED_DEVICE_FAMILY: "1,2"
+    SUPPORTS_MACCATALYST: NO
+    CODE_SIGN_STYLE: Automatic
+    ENABLE_USER_SCRIPT_SANDBOXING: NO
+    # Swift 6 strict concurrency everywhere — the whole codebase is audited.
+    SWIFT_STRICT_CONCURRENCY: complete
+    CLANG_CXX_LANGUAGE_STANDARD: "c++17"
+    GCC_C_LANGUAGE_STANDARD: c11
+    ENABLE_MODULE_VERIFIER: NO
+    # The Rust core only produces an arm64 simulator slice
+    # (`aarch64-apple-ios-sim`) — rustc has no `x86_64-apple-ios-sim` build in
+    # this toolchain and Apple Silicon is the only supported simulator host.
+    # Drop x86_64 from simulator builds so `generic/platform=iOS Simulator`
+    # (which otherwise fans out to both arches) links cleanly against the
+    # single-arch ShadowVPNCore.xcframework slice instead of failing to find
+    # x86_64 objects in libshadowvpn_ios_ffi.a.
+    "EXCLUDED_ARCHS[sdk=iphonesimulator*]": x86_64
+
+packages:
+  SVPNShared:
+    path: SVPNShared
+
+targets:
+  # -------------------------------------------------------------------------
+  # The SwiftUI application.
+  # -------------------------------------------------------------------------
+  shadowvpn-ios:
+    type: application
+    platform: iOS
+    sources:
+      - path: App/Sources
+      - path: App/Resources
+        optional: true
+        excludes:
+          - "**/*.md"
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleDisplayName: ShadowVPN
+        CFBundleShortVersionString: "1.0.0"
+        CFBundleVersion: "2026061901"
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UILaunchScreen:
+          UIColorName: LaunchBackground
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: false
+          NSAllowsLocalNetworking: true
+        # ShadowVPN ships standard AEAD (chacha20-poly1305 / aes-gcm); claim the
+        # exemption so App Store Connect skips the export-compliance prompt.
+        ITSAppUsesNonExemptEncryption: false
+    entitlements:
+      path: App/App.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.com.tangzixiang.shadowvpn
+        com.apple.developer.networking.networkextension:
+          - packet-tunnel-provider
+        keychain-access-groups:
+          - $(AppIdentifierPrefix)com.tangzixiang.shadowvpn
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.tangzixiang.shadowvpn
+        INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: YES
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        CODE_SIGN_ENTITLEMENTS: App/App.entitlements
+        SWIFT_OBJC_BRIDGING_HEADER: App/Sources/BridgingHeader.h
+        GENERATE_INFOPLIST_FILE: NO
+        CLANG_ENABLE_MODULES: YES
+        HEADER_SEARCH_PATHS:
+          - $(SRCROOT)/ShadowVPNCore/include
+        LIBRARY_SEARCH_PATHS:
+          - $(SRCROOT)/ShadowVPNCore/Frameworks
+        # -ObjC forces the linker to pull every ObjC category/class out of the
+        # static archive inside the xcframework (NE driver + Rust glue).
+        OTHER_LDFLAGS:
+          - -ObjC
+    dependencies:
+      - target: PacketTunnel
+        embed: true
+        codeSign: true
+      - package: SVPNShared
+        product: SVPNModels
+      - package: SVPNShared
+        product: SVPNIPC
+      - framework: ShadowVPNCore/Frameworks/ShadowVPNCore.xcframework
+        embed: false
+        optional: true
+      - sdk: SystemConfiguration.framework
+    postBuildScripts:
+      - name: Strip Release binary (strip -Sx)
+        runOnlyWhenInstalling: false
+        basedOnDependencyAnalysis: false
+        script: |
+          if [ "$CONFIGURATION" = "Release" ]; then
+            /usr/bin/xcrun strip -Sx "$TARGET_BUILD_DIR/$EXECUTABLE_PATH"
+          fi
+
+  # -------------------------------------------------------------------------
+  # The NetworkExtension packet-tunnel provider.
+  #
+  # Bundles its own copy of chnroute.txt (from Shared/Resources) so the
+  # extension can read the China CIDR set directly out of its own bundle when
+  # building NEPacketTunnelNetworkSettings excludedRoutes — the NE process can
+  # only read its own bundle, not the app's.
+  # -------------------------------------------------------------------------
+  PacketTunnel:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: PacketTunnel/Sources
+      - path: Shared/Resources/chnroute.txt
+        buildPhase: resources
+    info:
+      path: PacketTunnel/Info.plist
+      properties:
+        CFBundleDisplayName: ShadowVPN Tunnel
+        CFBundleShortVersionString: "1.0.0"
+        CFBundleVersion: "2026061901"
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.networkextension.packet-tunnel
+          NSExtensionPrincipalClass: PacketTunnelProvider
+    entitlements:
+      path: PacketTunnel/PacketTunnel.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.com.tangzixiang.shadowvpn
+        com.apple.developer.networking.networkextension:
+          - packet-tunnel-provider
+        keychain-access-groups:
+          - $(AppIdentifierPrefix)com.tangzixiang.shadowvpn
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.tangzixiang.shadowvpn.PacketTunnel
+        CODE_SIGN_ENTITLEMENTS: PacketTunnel/PacketTunnel.entitlements
+        # The extension is currently pure ObjC, but wire the bridging header now
+        # so any Swift added to the NE target sees the svpn_* C surface.
+        SWIFT_OBJC_BRIDGING_HEADER: PacketTunnel/Sources/BridgingHeader.h
+        GENERATE_INFOPLIST_FILE: NO
+        CLANG_ENABLE_MODULES: YES
+        HEADER_SEARCH_PATHS:
+          - $(SRCROOT)/ShadowVPNCore/include
+        LIBRARY_SEARCH_PATHS:
+          - $(SRCROOT)/ShadowVPNCore/Frameworks
+        OTHER_LDFLAGS:
+          - -ObjC
+    dependencies:
+      - package: SVPNShared
+        product: SVPNModels
+      - package: SVPNShared
+        product: SVPNIPC
+      - framework: ShadowVPNCore/Frameworks/ShadowVPNCore.xcframework
+        embed: false
+        optional: true
+      - sdk: SystemConfiguration.framework
+    postBuildScripts:
+      - name: Strip Release binary (strip -Sx)
+        runOnlyWhenInstalling: false
+        basedOnDependencyAnalysis: false
+        script: |
+          if [ "$CONFIGURATION" = "Release" ]; then
+            /usr/bin/xcrun strip -Sx "$TARGET_BUILD_DIR/$EXECUTABLE_PATH"
+          fi
+
+schemes:
+  shadowvpn-ios:
+    build:
+      targets:
+        shadowvpn-ios: all
+        PacketTunnel: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+    archive:
+      config: Release

@@ -1,0 +1,6 @@
+shadowvpn-ios.xcodeproj/
+core/rust/*/target/
+ShadowVPNCore/Frameworks/*.xcframework/
+**/.build/
+.DS_Store
+Local.xcconfig
