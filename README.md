@@ -58,6 +58,28 @@ DEVELOPMENT_TEAM = 32B45SMMQL
 - App group: `group.com.tangzixiang.shadowvpn`
 - Deployment target: iOS 17.0
 
+## Privacy
+
+ShadowVPN is a self-hosted VPN client: you connect to **your own** server, and
+no traffic is ever proxied through any service operated by us.
+
+- **No data collection.** The app has no analytics, no tracking, no ads, and no
+  third-party SDKs. We do not operate any server that receives your data.
+- **No account.** There is no sign-up, login, or identity of any kind.
+- **On-device only.** Your server addresses, pre-shared keys, and settings are
+  stored locally on your device (in the app group container) and never leave it
+  except to establish the tunnel you configured.
+- **Tunnel traffic.** Your network traffic flows directly between your device
+  and the server you specify, encrypted with the shadowsocks AEAD scheme. We
+  cannot see it.
+- **GeoIP database.** Country-based split tunneling is resolved entirely
+  on-device from a bundled MaxMind GeoLite2 database. No lookups are sent
+  anywhere.
+
+Because the app collects nothing, there is nothing for us to share, sell, or
+disclose. Questions: open an issue at
+<https://github.com/madeye/shadowvpn-ios>.
+
 ## License
 
 [MIT](LICENSE) © 2026 Max Lv

@@ -1,0 +1,31 @@
+{
+  "primaryCategory": "UTILITIES",
+  "appInfo": {
+    "en-US": {
+      "name": "ShadowVPN - Fast Proxy",
+      "subtitle": "Secure Shadowsocks tunnel",
+      "privacyPolicyUrl": "https://github.com/madeye/shadowvpn-ios#privacy"
+    },
+    "zh-Hans": {
+      "name": "ShadowVPN - 极速代理",
+      "subtitle": "安全的 Shadowsocks 隧道",
+      "privacyPolicyUrl": "https://github.com/madeye/shadowvpn-ios#privacy"
+    }
+  },
+  "version": {
+    "en-US": {
+      "description": "ShadowVPN is a minimal, fast, point-to-point VPN client built on the ShadowVPN protocol — a UDP, pre-shared-key, layer-3 tunnel using the shadowsocks AEAD encryption scheme.\n\nYou bring your own server; ShadowVPN connects to it. Nothing is proxied through us, and there is no account to create.\n\nFEATURES\n• Fast UDP tunnel — a lightweight raw-IP data plane with no SOCKS layer or userland TCP stack overhead.\n• Strong encryption — shadowsocks AEAD ciphers protect every datagram.\n• Split tunneling — route only what you need and bypass traffic by country using an on-device GeoIP database.\n• Multiple profiles — store and switch between several servers.\n• Traffic obfuscation — optional obfuscation to blend in with ordinary traffic.\n• On-device only — your keys and configuration never leave your device.\n• Native & efficient — a SwiftUI app driving Apple's Network Extension, with a compact Rust core for the data plane.\n\nShadowVPN is for users who want a simple, transparent, self-hosted VPN.",
+      "keywords": "vpn,proxy,shadowsocks,tunnel,privacy,secure,udp,split tunnel,encrypt,bypass",
+      "supportUrl": "https://github.com/madeye/shadowvpn-ios",
+      "marketingUrl": "https://github.com/madeye/shadowvpn-ios",
+      "promotionalText": "A minimal, fast, self-hosted VPN client built on the ShadowVPN protocol. Bring your own server."
+    },
+    "zh-Hans": {
+      "description": "ShadowVPN 是一个轻量、快速的点对点 VPN 客户端，基于 ShadowVPN 协议——一种使用 shadowsocks AEAD 加密的 UDP、预共享密钥三层隧道。\n\n你使用自己的服务器，ShadowVPN 连接到它。我们不代理任何流量，也无需注册账号。\n\n功能\n• 快速 UDP 隧道 — 轻量的原始 IP 数据面，无 SOCKS 层或用户态 TCP 协议栈开销。\n• 强加密 — shadowsocks AEAD 加密保护每一个数据报。\n• 分流 — 只路由你需要的流量，并使用设备上的 GeoIP 数据库按国家绕过。\n• 多配置 — 保存并在多个服务器之间切换。\n• 流量混淆 — 可选的混淆，让流量更难被识别。\n• 仅在本地 — 你的密钥和配置从不离开设备。\n• 原生高效 — SwiftUI 应用驱动 Apple 的 Network Extension，数据面由紧凑的 Rust 核心实现。\n\nShadowVPN 适合希望拥有简单、透明、自托管 VPN 的用户。",
+      "keywords": "vpn,代理,shadowsocks,隧道,隐私,加密,udp,分流,翻墙,科学上网",
+      "supportUrl": "https://github.com/madeye/shadowvpn-ios",
+      "marketingUrl": "https://github.com/madeye/shadowvpn-ios",
+      "promotionalText": "基于 ShadowVPN 协议的轻量、快速、自托管 VPN 客户端。使用你自己的服务器。"
+    }
+  }
+}

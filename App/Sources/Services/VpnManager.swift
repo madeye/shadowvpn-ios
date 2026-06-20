@@ -14,9 +14,10 @@ import SVPNModels
 ///   * `NEVPNStatusDidChange` → ``stage`` (the authoritative connection state
 ///     from the NE host), with ``connectedDate`` captured on the connected edge
 ///     for the uptime label.
-///   * a Darwin `traffic` notification → re-read ``SharedStore/readTraffic()``
-///     into ``traffic`` (the cumulative up/down + per-second rates the
-///     extension's traffic pump publishes).
+///   * Darwin `state` / `traffic` notifications → re-read the extension's
+///     App-Group snapshots for uptime, errors and counters. Those snapshots are
+///     supplemental: after app replacement iOS can leave stale `state.json`
+///     behind, so it must not override a disconnected/invalid NE status.
 @MainActor
 @Observable
 final class VpnManager {
@@ -205,7 +206,26 @@ final class VpnManager {
     /// Tear the tunnel down. Disables on-demand first so iOS doesn't
     /// immediately auto-reconnect when the user deliberately turns the VPN off.
     func disconnect() async {
-        guard let manager else { return }
+        guard let manager else {
+            clearStaleActiveExtensionState()
+            applyDisconnectedBaseline()
+            return
+        }
+        let status = manager.connection.status
+        guard Self.canStopTunnel(status) else {
+            // If the app was upgraded while the extension was running, the
+            // persisted App-Group state can still say "connected" even though
+            // iOS has already invalidated/disconnected the NE profile. A stop
+            // request cannot produce a status notification in that state, so
+            // repair the UI immediately and allow the next tap to connect.
+            if manager.isOnDemandEnabled {
+                manager.isOnDemandEnabled = false
+                try? await manager.saveToPreferences()
+            }
+            clearStaleActiveExtensionState()
+            applyConnectionStatus(status)
+            return
+        }
         if manager.isOnDemandEnabled {
             manager.isOnDemandEnabled = false
             try? await manager.saveToPreferences()
@@ -315,17 +335,96 @@ final class VpnManager {
     }
 
     /// Reflect a state snapshot the extension wrote (carries the authoritative
-    /// stage, error message and start time across processes).
+    /// error message and start time across processes). The NE connection status
+    /// remains the lifecycle authority because app replacement can strand a
+    /// stale active `state.json` after the old provider has already gone away.
     private func applyExtensionState(_ state: VpnState) {
-        stage = state.stage
-        if let started = state.startedAt {
-            connectedDate = started
+        if let status = manager?.connection.status {
+            reconcileExtensionState(state, with: status)
+            return
         }
+        applyExtensionStateWithoutConnection(state)
+    }
+
+    /// Merge an extension snapshot with the live NE status. This avoids the
+    /// app-update failure mode where an old connected snapshot makes the Home
+    /// toggle call `stopVPNTunnel()` forever even though there is no live tunnel.
+    private func reconcileExtensionState(_ state: VpnState, with status: NEVPNStatus) {
+        switch status {
+        case .invalid, .disconnected:
+            if state.stage.isActive {
+                clearStaleActiveExtensionState()
+            }
+            if state.stage == .error {
+                applyExtensionError(state)
+            } else {
+                applyConnectionStatus(status)
+            }
+        case .connected:
+            stage = .connected
+            connectedDate = state.startedAt ?? connectedDate ?? Date()
+            if let msg = state.message, !msg.isEmpty {
+                lastError = msg
+            }
+        case .connecting, .reasserting:
+            if state.stage == .error {
+                applyExtensionError(state)
+            } else {
+                stage = .connecting
+            }
+        case .disconnecting:
+            if state.stage == .disconnected {
+                applyDisconnectedBaseline()
+            } else if state.stage == .error {
+                applyExtensionError(state)
+            } else {
+                stage = .connecting
+            }
+        @unknown default:
+            applyConnectionStatus(status)
+        }
+    }
+
+    /// Fallback used before a `NETunnelProviderManager` is attached.
+    private func applyExtensionStateWithoutConnection(_ state: VpnState) {
+        stage = state.stage
+        connectedDate = state.startedAt
         if let msg = state.message, !msg.isEmpty {
             lastError = msg
         }
         if state.stage == .disconnected || state.stage == .error {
             connectedDate = nil
+        }
+    }
+
+    private func applyExtensionError(_ state: VpnState) {
+        stage = .error
+        connectedDate = nil
+        traffic = .empty
+        if let msg = state.message, !msg.isEmpty {
+            lastError = msg
+        }
+    }
+
+    private func applyDisconnectedBaseline() {
+        stage = .disconnected
+        connectedDate = nil
+        traffic = .empty
+    }
+
+    private func clearStaleActiveExtensionState() {
+        guard let state = SharedStore.readState(), state.stage.isActive else { return }
+        try? SharedStore.writeState(.disconnected)
+    }
+
+    private nonisolated static func canStopTunnel(_ status: NEVPNStatus) -> Bool {
+        switch status {
+        case .connected, .connecting, .reasserting, .disconnecting:
+            true
+        case .invalid, .disconnected:
+            false
+        @unknown default:
+            false
         }
     }
 
