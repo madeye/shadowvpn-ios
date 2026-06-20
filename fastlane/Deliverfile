@@ -1,0 +1,8 @@
+# ShadowVPN — screenshot/metadata delivery config.
+# Auth + screenshots are passed on the CLI; this file's presence stops
+# `deliver` from prompting to run interactive setup.
+app_identifier("com.tangzixiang.shadowvpn")
+skip_binary_upload(true)
+overwrite_screenshots(true)
+run_precheck_before_submit(false)
+force(true)
