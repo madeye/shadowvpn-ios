@@ -221,8 +221,18 @@ static const NSTimeInterval kEngineRestartDebounceS = 3.0;
 }
 
 - (void)wake {
-    os_log_info(gLog, "wake: tun remained active");
-    SVEngineLog(SVLogInfo, @"NE: wake — tun remained active");
+    os_log_info(gLog, "wake: rebinding carrier socket after device sleep");
+    SVEngineLog(SVLogInfo, @"NE: wake — rebinding carrier socket after device sleep");
+    // A sleep/wake cycle can strand the core's connect()ed UDP carrier socket on
+    // a source address/route the kernel invalidated while the device slept: sends
+    // then silently blackhole and recv never returns, so no engine task errors
+    // and the tunnel sits connected-but-frozen. The nw_path_monitor only rebinds
+    // on a satisfied / interface-type / address-family transition, and none of
+    // those fire when we wake on the same network — which is exactly why manually
+    // switching networks "unfreezes" traffic. Schedule the same debounced in-place
+    // engine restart so the carrier socket is rebound against the post-wake
+    // network; the debounce coalesces with any path updates the wake itself emits.
+    [self scheduleEngineRestartForReason:@"wake"];
 }
 
 // MARK: - Debounced restart
