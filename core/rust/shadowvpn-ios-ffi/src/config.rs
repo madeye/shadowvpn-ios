@@ -14,14 +14,19 @@
 //!   "mtu": 1400,
 //!   "dns_local": "114.114.114.114:53",
 //!   "dns_remote": "8.8.8.8:53",
-//!   "chnroute_path": "/abs/chnroute.txt"
+//!   "chnroute_path": "/abs/chnroute.txt",
+//!   "gfwlist_path": "/abs/gfwlist.txt"
 //! }
 //! ```
 //!
 //! Only `server`, `password`, and `cipher` are strictly required. `mode`
 //! defaults to `full`; `mtu` to the upstream [`DEFAULT_TUN_MTU`]. The DNS
 //! fields and `chnroute_path` are only consulted in `chinadns` mode (see
-//! [`crate::dns_intercept`]); they are optional everywhere else.
+//! [`crate::dns_intercept`]); they are optional everywhere else. `gfwlist_path`
+//! is an *optional* chinadns force-tunnel override (mirrors upstream PR #17):
+//! when present, names matching the bundled gfwlist always resolve via the clean
+//! tunneled upstream regardless of the local-vs-clean race. It is ignored in
+//! every other mode and absent by default.
 
 use serde::Deserialize;
 
@@ -94,6 +99,10 @@ struct RawConfig {
     /// Absolute path to the bundled/staged `chnroute.txt` for chinadns mode.
     #[serde(default)]
     chnroute_path: Option<String>,
+    /// Absolute path to the bundled/staged `gfwlist.txt` — an optional
+    /// force-tunnel override consulted only in chinadns mode.
+    #[serde(default)]
+    gfwlist_path: Option<String>,
     /// Carrier obfuscation. Defaults to [`Obfs::None`].
     #[serde(default)]
     obfs: Obfs,
@@ -119,6 +128,9 @@ pub struct RuntimeConfig {
     pub dns_remote: Option<String>,
     /// Path to `chnroute.txt` (chinadns mode).
     pub chnroute_path: Option<String>,
+    /// Path to `gfwlist.txt` — optional chinadns force-tunnel override. `None`
+    /// disables the override (plain chinadns race behavior).
+    pub gfwlist_path: Option<String>,
     /// Carrier obfuscation applied to every datagram.
     pub obfs: Obfs,
 }
@@ -169,6 +181,7 @@ impl RuntimeConfig {
             dns_local: raw.dns_local,
             dns_remote: raw.dns_remote,
             chnroute_path: raw.chnroute_path,
+            gfwlist_path: raw.gfwlist_path,
             obfs: raw.obfs,
         })
     }
@@ -226,6 +239,19 @@ mod tests {
         assert_eq!(cfg.mode, Mode::Chinadns);
         assert_eq!(cfg.dns_local.as_deref(), Some("114.114.114.114:53"));
         assert_eq!(cfg.dns_remote.as_deref(), Some("8.8.8.8:53"));
+        // gfwlist_path is optional: absent here.
+        assert_eq!(cfg.gfwlist_path, None);
+    }
+
+    #[test]
+    fn chinadns_accepts_optional_gfwlist_path() {
+        let json = r#"{
+            "server":"h:1","password":"p","cipher":"aes-256-gcm","mode":"chinadns",
+            "dns_local":"114.114.114.114:53","dns_remote":"8.8.8.8:53",
+            "chnroute_path":"/tmp/chnroute.txt","gfwlist_path":"/tmp/gfwlist.txt"
+        }"#;
+        let cfg = RuntimeConfig::from_json(json).expect("parse");
+        assert_eq!(cfg.gfwlist_path.as_deref(), Some("/tmp/gfwlist.txt"));
     }
 
     #[test]

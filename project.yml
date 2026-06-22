@@ -161,6 +161,11 @@ targets:
       # ChinaDNS/split country (CN) skip the one-time on-device mmdb extraction.
       - path: Shared/Resources/chnroute.txt
         buildPhase: resources
+      # gfwlist domain-suffix set: an optional chinadns force-tunnel override
+      # (upstream PR #17). The NE reads its own bundle copy and passes the path
+      # as `gfwlist_path`; names on the list always take the clean tunneled path.
+      - path: Shared/Resources/gfwlist.txt
+        buildPhase: resources
     info:
       path: PacketTunnel/Info.plist
       properties:

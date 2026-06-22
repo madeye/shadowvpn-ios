@@ -233,6 +233,11 @@ public extension Profile {
     /// `chnroute.txt`; pass it only when the mode needs it (`chnroute` /
     /// `chinadns`). Keys are emitted unconditionally except `chnroute_path`, so
     /// the JSON stays stable and predictable for the Rust `serde` deserializer.
+    ///
+    /// Note: the optional `gfwlist_path` (a chinadns force-tunnel override) is
+    /// *not* set here — it points at the NE's bundled `gfwlist.txt`, a fixed
+    /// resource rather than a profile field, so the extension injects it directly
+    /// in `buildConfigJSONFromConfig` at start time.
     func configJSON(chnroutePath: String? = nil) -> [String: Any] {
         var dict: [String: Any] = [
             "server": serverAddress,

@@ -15,9 +15,9 @@ App/              SwiftUI app target (Sources + Resources, incl. chnroute.txt)
 PacketTunnel/     NEPacketTunnelProvider extension (ObjC SV* driver)
 SVPNShared/       Local SPM package shared by app + extension (SVPNModels, SVPNIPC)
 ShadowVPNCore/    C header + XCFramework for the Rust core
-Shared/Resources/ chnroute.txt (CN CIDR set) bundled into the extension
+Shared/Resources/ chnroute.txt (CN CIDR set) + gfwlist.txt, bundled into the extension
 core/rust/        shadowvpn-ios-ffi (the C-ABI crate) + chnroute-gen
-scripts/          build-rust.sh, generate-xcodeproj.sh
+scripts/          build-rust.sh, generate-xcodeproj.sh, gen-gfwlist.sh
 ```
 
 ## Building

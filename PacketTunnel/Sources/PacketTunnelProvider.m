@@ -114,9 +114,14 @@ static const NSTimeInterval kEngineRestartDebounceS = 3.0;
     // (mmdb missing or no networks for the code); split modes degrade to a full
     // tunnel for the session and chinadns start will fail validation cleanly.
     NSURL *chnrouteURL = [self resolveCountryCIDRURLForCountry:country];
+    // Optional chinadns force-tunnel override (upstream PR #17): the NE bundles
+    // gfwlist.txt and passes its own copy's path as gfwlist_path. nil ⇒ the
+    // override is simply absent and chinadns runs its plain local-vs-clean race.
+    NSURL *gfwlistURL = [self resolveBundledGfwlistURL];
     _configJSON = [self buildConfigJSONFromConfig:cfg
                                             mode:mode
-                                     chnrouteURL:chnrouteURL];
+                                     chnrouteURL:chnrouteURL
+                                      gfwlistURL:gfwlistURL];
 
     // Resolve the server host to dotted IPv4 literal(s). iOS rejects a bare
     // hostname as the tunnel remote address, and the resolved IPs double as the
@@ -484,6 +489,20 @@ static const NSTimeInterval kEngineRestartDebounceS = 3.0;
     return result;
 }
 
+// Resolve the bundled gfwlist.txt (the NE's own bundle copy). Used as the
+// chinadns force-tunnel override (svpn config `gfwlist_path`): names matching it
+// always take the clean tunneled path. Returns nil when the file isn't bundled,
+// in which case the override is simply absent and chinadns runs its plain race.
+- (nullable NSURL *)resolveBundledGfwlistURL {
+    NSURL *bundled = [[NSBundle mainBundle] URLForResource:@"gfwlist" withExtension:@"txt"];
+    if (bundled && [[NSFileManager defaultManager] fileExistsAtPath:bundled.path]) {
+        return bundled;
+    }
+    os_log_info(gLog, "no bundled gfwlist.txt; chinadns force-tunnel override disabled");
+    SVEngineLog(SVLogInfo, @"NE: no bundled gfwlist.txt (force-tunnel override disabled)");
+    return nil;
+}
+
 // Read the last error the Rust core set on this thread, or nil.
 - (nullable NSString *)lastRustError {
     const char *p = svpn_core_last_error();
@@ -493,15 +512,17 @@ static const NSTimeInterval kEngineRestartDebounceS = 3.0;
 // Assemble the `config_json` string for svpn_tun_start from the providerConfig.
 // The shape matches the C-ABI contract in shadowvpn_core.h / Profile.configJSON:
 //   {"server","password","cipher","mode","mtu","dns_local","dns_remote",
-//    "chnroute_path"?}
+//    "chnroute_path"?,"gfwlist_path"?}
 // We rebuild it here (rather than trust an app-provided blob) so the NE controls
-// exactly what the core sees, and so chnroute_path points at the path the NE
-// resolved above. If the app already provided a ready "config_json" string we
-// honour it, only injecting the resolved chnroute_path for split modes.
+// exactly what the core sees, and so chnroute_path/gfwlist_path point at the
+// paths the NE resolved above. If the app already provided a ready "config_json"
+// string we honour it, only injecting the resolved paths for split modes.
 - (NSString *)buildConfigJSONFromConfig:(NSDictionary *)cfg
                                   mode:(NSString *)mode
-                           chnrouteURL:(nullable NSURL *)chnrouteURL {
+                           chnrouteURL:(nullable NSURL *)chnrouteURL
+                            gfwlistURL:(nullable NSURL *)gfwlistURL {
     BOOL isSplit = [mode isEqualToString:@"chnroute"] || [mode isEqualToString:@"chinadns"];
+    BOOL isChinaDns = [mode isEqualToString:@"chinadns"];
 
     NSString *provided = [self stringFromConfig:cfg key:@"config_json" fallback:nil];
     NSMutableDictionary *dict = nil;
@@ -527,6 +548,11 @@ static const NSTimeInterval kEngineRestartDebounceS = 3.0;
     dict[@"obfs"] = [self stringFromConfig:cfg key:@"obfs" fallback:@"none"];
     if (isSplit && chnrouteURL) {
         dict[@"chnroute_path"] = chnrouteURL.path;
+    }
+    // gfwlist is a chinadns-only force-tunnel override; never inject it in plain
+    // chnroute mode (the core ignores it there anyway).
+    if (isChinaDns && gfwlistURL) {
+        dict[@"gfwlist_path"] = gfwlistURL.path;
     }
 
     NSData *json = [NSJSONSerialization dataWithJSONObject:dict
