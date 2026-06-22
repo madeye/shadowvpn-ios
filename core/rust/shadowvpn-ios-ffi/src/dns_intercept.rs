@@ -43,6 +43,7 @@ use crate::obfs::Obfuscator;
 use crate::vendor::crypto::{encrypt_packet, Cipher};
 use crate::vendor::dns::{a_records, question};
 use crate::vendor::policy::chnroute::ChnRoute;
+use crate::vendor::policy::gfwlist::GfwList;
 
 /// IPv4 protocol number for UDP.
 const IPPROTO_UDP: u8 = 17;
@@ -92,6 +93,12 @@ struct Pending {
 pub struct DnsInterceptor {
     /// China IPv4 ranges, loaded once from `chnroute_path`.
     chnroute: ChnRoute,
+    /// Optional force-tunnel override (gfwlist mode parity, upstream PR #17):
+    /// names matching this list skip the local-vs-clean race and always resolve
+    /// via the clean tunneled upstream. Empty when no `gfwlist_path` was given,
+    /// in which case [`GfwList::matches`] is always `false` and behavior is the
+    /// plain chinadns race.
+    gfwlist: GfwList,
     /// Domestic resolver `ip:port`.
     dns_local: SocketAddrV4,
     /// Clean upstream resolver `ip:port`.
@@ -129,6 +136,27 @@ impl DnsInterceptor {
         let chnroute =
             ChnRoute::load(path).map_err(|e| format!("chinadns: load {path} failed: {e}"))?;
 
+        // Optional force-tunnel override. Unlike chnroute, the gfwlist is not
+        // required for chinadns: a missing/unreadable file just disables the
+        // override (empty list → no name ever forces the tunnel), so we log and
+        // continue rather than fail the whole interceptor.
+        let gfwlist = match cfg.gfwlist_path.as_deref() {
+            Some(p) if !p.is_empty() => match GfwList::load(p) {
+                Ok(list) => {
+                    log::info!(
+                        "chinadns: loaded {} gfwlist force-tunnel domains",
+                        list.len()
+                    );
+                    list
+                }
+                Err(e) => {
+                    log::warn!("chinadns: gfwlist load {p} failed: {e}; override disabled");
+                    GfwList::default()
+                }
+            },
+            _ => GfwList::default(),
+        };
+
         let dns_local = parse_sockaddr_v4(cfg.dns_local.as_deref().unwrap_or(""))
             .ok_or_else(|| "chinadns: dns_local is not a valid ip:port".to_string())?;
         let dns_remote = parse_sockaddr_v4(cfg.dns_remote.as_deref().unwrap_or(""))
@@ -148,6 +176,7 @@ impl DnsInterceptor {
 
         Ok(DnsInterceptor {
             chnroute,
+            gfwlist,
             dns_local,
             dns_remote,
             direct: Arc::new(direct),
@@ -172,7 +201,7 @@ impl DnsInterceptor {
         };
 
         // Read the question. A malformed DNS body → leave it to the normal path.
-        let Some((_name, qtype, qclass)) = question(&q.dns) else {
+        let Some((name, qtype, qclass)) = question(&q.dns) else {
             return false;
         };
 
@@ -190,6 +219,18 @@ impl DnsInterceptor {
         // A/IN: kick off the clean tunneled copy (fire-and-forget; the reply is
         // paired later in the egress loop), then race the direct domestic answer.
         self.send_clean_tunneled(&q);
+
+        // Force-tunnel override (upstream PR #17): if the name is on the gfwlist,
+        // skip the local-vs-clean race entirely and always trust the clean
+        // tunneled answer — covering domains the GFW poisons to an
+        // in-China-looking address that the race would misclassify as domestic.
+        // The pending entry left by `send_clean_tunneled` stays in place, so the
+        // tunneled reply is synthesized by `try_handle_tunneled_reply`. We do not
+        // query `dns_local` at all for these names.
+        if self.gfwlist.matches(&name) {
+            log::debug!("chinadns: gfwlist force-tunnel for {name}");
+            return true;
+        }
 
         let Some(local_answer) = self.query_direct(&q.dns).await else {
             // No domestic answer; the tunneled clean reply (if any) will be

@@ -63,6 +63,7 @@ ShadowVPNCore/
   Frameworks/ShadowVPNCore.xcframework  # built by scripts/build-rust.sh (gitignored)
 Shared/Resources/
   chnroute.txt                      # DONE: 5486 CN CIDRs, generated once from Country.mmdb
+  gfwlist.txt                       # chinadns force-tunnel override domains (scripts/gen-gfwlist.sh)
   Country.mmdb                      # kept for regeneration only; NOT bundled at runtime
 SVPNShared/                         # SPM package (SVPNModels + SVPNIPC)
 PacketTunnel/Sources/               # ObjC NE extension (SV* classes)
@@ -110,7 +111,9 @@ typedef void (*SvpnWritePacket)(void *ctx, const uint8_t *data, uintptr_t len);
 // config_json (UTF-8): {"server":"host:port","password":"...","cipher":"chacha20-poly1305",
 //   "mode":"full|chnroute|chinadns","mtu":1400,
 //   "dns_local":"114.114.114.114:53","dns_remote":"8.8.8.8:53",
-//   "chnroute_path":"/abs/chnroute.txt"}
+//   "chnroute_path":"/abs/chnroute.txt","gfwlist_path":"/abs/gfwlist.txt"}
+// gfwlist_path is OPTIONAL and consulted only in chinadns mode: a force-tunnel
+// override (upstream PR #17) — names on it always take the clean tunneled path.
 int   svpn_tun_start(void *ctx, SvpnWritePacket cb, const char *config_json); // 0 ok / -1 err
 int   svpn_tun_ingest(const uint8_t *data, uintptr_t len);  // Swift readPackets -> here
 void  svpn_tun_stop(void);                          // fire-and-forget
@@ -141,6 +144,12 @@ path (the server routes it; the reply returns through the tunnel). Decide with
 name is domestic → return the local answer (its IPs are china-routed = direct);
 otherwise return the clean/remote answer. Synthesize the response IP/UDP packet back
 to the client via the egress callback (swap src/dst, recompute IPv4 + UDP checksums).
+**gfwlist force-tunnel override (upstream PR #17):** when a `gfwlist_path` is
+supplied, any queried name matching the bundled gfwlist (`GfwList::matches`,
+domain-suffix) skips the local-vs-clean race entirely and always resolves via the
+clean tunneled upstream — covering domains the GFW poisons to an in-China-looking
+address that the race would otherwise misclassify as domestic. The override is
+optional: a missing/unreadable gfwlist just disables it (plain chinadns race).
 Reuse `shadowvpn::policy::dns::{question,a_records,min_ttl}`. **Bound the scope:**
 A/IN queries only; anything else (AAAA, etc.) — for AAAA return NODATA or just relay
 to dns_local. If a clean path is unavailable, fall back to the local answer. This

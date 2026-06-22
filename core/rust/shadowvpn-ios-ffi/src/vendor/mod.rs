@@ -29,6 +29,8 @@
 //! * [`protocol`] — framing/sizing constants (`MAX_IP_PACKET`,
 //!   `max_datagram_size`, `crypto_overhead`).
 //! * [`chnroute`] — the `ChnRoute` China-IPv4 range set used by chinadns mode.
+//! * [`gfwlist`] — the `GfwList` domain-suffix set used as a chinadns
+//!   force-tunnel override (upstream PR #17).
 //! * [`dns`] — read-only DNS wire helpers (`question`, `a_records`, `min_ttl`).
 
 // These modules are kept VERBATIM from upstream so they track its crypto/DNS
@@ -44,10 +46,13 @@ pub mod dns;
 #[allow(dead_code)]
 pub mod protocol;
 
-/// The `policy::*` sub-namespace, re-created so the vendored `chnroute` module
-/// keeps its upstream import path (`shadowvpn::policy::chnroute`) intact and so
-/// future iOS-safe policy helpers slot in here without churn.
+/// The `policy::*` sub-namespace, re-created so the vendored `chnroute` /
+/// `gfwlist` modules keep their upstream import path
+/// (`shadowvpn::policy::{chnroute,gfwlist}`) intact and so future iOS-safe
+/// policy helpers slot in here without churn.
 pub mod policy {
     #[allow(dead_code)]
     pub mod chnroute;
+    #[allow(dead_code)]
+    pub mod gfwlist;
 }
