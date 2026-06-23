@@ -132,8 +132,17 @@ public struct Profile: Codable, Sendable, Equatable, Identifiable {
     /// what the server sees as the packet source. **Must equal the server's
     /// `peer_ip`** so the server's `peer_ip/24` route can deliver return traffic
     /// back down the tunnel. Defaults to ``defaultPeerIP`` (`10.9.0.2`), matching
-    /// the reference server config.
+    /// the reference server config. Ignored when ``autoIP`` is on (the server
+    /// leases an address instead).
     public var peerIP: String
+
+    /// Whether to let the server **auto-assign** the tunnel IP instead of using
+    /// the static ``peerIP`` (upstream PR #20's in-band control channel). When
+    /// on, the NE performs a `Control::Request` → `Control::Assign` handshake at
+    /// connect time and uses the leased address for the TUN — so one config can
+    /// be shared across devices. Requires a server running with `auto_assign`.
+    /// Defaults to `false` (static ``peerIP``).
+    public var autoIP: Bool
 
     public init(
         id: UUID = UUID(),
@@ -149,6 +158,7 @@ public struct Profile: Codable, Sendable, Equatable, Identifiable {
         bypassCountry: String = Profile.defaultBypassCountry,
         obfuscation: Obfuscation = .none,
         peerIP: String = Profile.defaultPeerIP,
+        autoIP: Bool = false,
     ) {
         self.id = id
         self.name = name
@@ -163,6 +173,7 @@ public struct Profile: Codable, Sendable, Equatable, Identifiable {
         self.bypassCountry = bypassCountry
         self.obfuscation = obfuscation
         self.peerIP = peerIP
+        self.autoIP = autoIP
     }
 
     /// Tolerant decoder: every field falls back to its default when absent, so a
@@ -190,6 +201,7 @@ public struct Profile: Codable, Sendable, Equatable, Identifiable {
         // default so an older/newer profile still loads.
         obfuscation = (try? c.decode(Obfuscation.self, forKey: .obfuscation)) ?? d.obfuscation
         peerIP = try c.decodeIfPresent(String.self, forKey: .peerIP) ?? d.peerIP
+        autoIP = try c.decodeIfPresent(Bool.self, forKey: .autoIP) ?? d.autoIP
     }
 
     // MARK: Defaults (mirror `config.rs`)

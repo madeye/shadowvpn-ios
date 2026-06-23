@@ -199,19 +199,24 @@ struct ProfileEditorView: View {
                 identifier: "settings.field.mtu",
             )
             .keyboardType(.numberPad)
-            LabeledField(
-                "settings.field.peerIP",
-                text: $form.peerIP,
-                placeholder: Profile.defaultPeerIP,
-                identifier: "settings.field.peerIP",
-            )
-            .textInputAutocapitalization(.never)
-            .autocorrectionDisabled()
-            .keyboardType(.numbersAndPunctuation)
+            Toggle("settings.field.autoIP", isOn: $form.autoIP)
+                .accessibilityIdentifier("settings.field.autoIP")
+            // The static peer IP is only used when the server isn't assigning one.
+            if !form.autoIP {
+                LabeledField(
+                    "settings.field.peerIP",
+                    text: $form.peerIP,
+                    placeholder: Profile.defaultPeerIP,
+                    identifier: "settings.field.peerIP",
+                )
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .keyboardType(.numbersAndPunctuation)
+            }
         } header: {
             Text("settings.section.advanced")
         } footer: {
-            Text("settings.field.peerIP.footer")
+            Text(form.autoIP ? "settings.field.autoIP.footer" : "settings.field.peerIP.footer")
         }
     }
 

@@ -46,15 +46,24 @@ use parking_lot::Mutex;
 use tokio::net::UdpSocket;
 use tokio::sync::mpsc;
 
+use std::net::Ipv4Addr;
+
 use crate::config::{Mode, Obfs, RuntimeConfig};
 use crate::dns_intercept::{self, DnsInterceptor};
 use crate::logging;
 use crate::obfs::{self, Obfuscator, QuicObfs};
+use crate::vendor::control::{self, Control};
 use crate::vendor::crypto::{decrypt_packet, encrypt_packet};
 use crate::vendor::protocol::max_datagram_size;
 
 /// How often to send a keepalive datagram (per upstream `client.rs`).
 const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(25);
+
+/// How many times to (re)send an auto-IP request before giving up (per upstream
+/// `client.rs`).
+const AUTO_IP_RETRIES: u32 = 5;
+/// How long to wait for an ASSIGN reply after each auto-IP request.
+const AUTO_IP_TIMEOUT: Duration = Duration::from_secs(2);
 /// Keepalive plaintext: a single zero byte — smaller than any IP header, so the
 /// server drops it cheaply and it never reaches a TUN-write path.
 const KEEPALIVE_PAYLOAD: &[u8] = &[0u8];
@@ -212,19 +221,7 @@ pub fn start(ctx: *mut c_void, cb: WritePacketFn, config_json: &str) -> Result<(
     // Carrier obfuscation. When enabled, every datagram is wrapped to look like
     // a QUIC short-header packet on the wire (and unwrapped on egress). `None`
     // is the plain `salt ++ AEAD` envelope. The peer must apply the inverse.
-    let obfuscator: Option<Arc<Obfuscator>> = match cfg.obfs {
-        Obfs::Quic => {
-            logging::bridge_log("svpn obfs: QUIC/HTTP3 datagram shaping active");
-            Some(Arc::new(Obfuscator::Quic(QuicObfs::new(
-                obfs::DEFAULT_DCID_LEN,
-            ))))
-        }
-        Obfs::Base64 => {
-            logging::bridge_log("svpn obfs: base64 plain-text shaping active");
-            Some(Arc::new(Obfuscator::Base64))
-        }
-        Obfs::None => None,
-    };
+    let obfuscator = build_obfuscator(cfg.obfs);
 
     // chinadns interceptor — only built in chinadns mode. In every other mode
     // it is `None` and the ingress path is the plain encrypt-and-forward loop.
@@ -391,6 +388,138 @@ pub fn traffic() -> (i64, i64) {
 }
 
 // ---------------------------------------------------------------------------
+// Auto-IP assignment handshake (upstream PR #20)
+// ---------------------------------------------------------------------------
+
+/// Perform the one-shot auto-IP handshake and return the server-assigned tunnel
+/// IPv4 address.
+///
+/// Binds a temporary UDP socket, `connect()`s it to `cfg.server`, sends an
+/// encrypted (and, when configured, obfuscated) [`Control::Request`], and waits
+/// for the server's [`Control::Assign`] — retrying a few times on timeout.
+/// Mirrors upstream `client.rs::request_address`.
+///
+/// On iOS this MUST run **before** `setTunnelNetworkSettings`, since the assigned
+/// IP becomes the TUN interface address; it is therefore a standalone call (the
+/// data plane's `svpn_tun_start` runs only after the tunnel settings are
+/// applied). Only the assigned `ip` is returned — iOS keeps its own `/30` +
+/// `10/8`-exclusion convention and the profile MTU, so the ASSIGN's
+/// netmask/peer/mtu are not needed here.
+///
+/// Blocking; call from a NON-runtime thread (the NE control queue). Returns a
+/// human-readable error string on socket failure, a NAK, or exhausted retries.
+pub fn request_address(cfg: &RuntimeConfig) -> Result<Ipv4Addr, String> {
+    let cipher = cfg.cipher;
+    let master_key: Arc<[u8]> = Arc::from(cfg.master_key.clone().into_boxed_slice());
+    let obfuscator = build_obfuscator(cfg.obfs);
+    let server = cfg.server.clone();
+
+    runtime().block_on(async move {
+        let socket = UdpSocket::bind(("0.0.0.0", 0))
+            .await
+            .map_err(|e| format!("auto-IP: failed to bind UDP socket: {e}"))?;
+        socket
+            .connect(&server)
+            .await
+            .map_err(|e| format!("auto-IP: failed to connect to {server}: {e}"))?;
+
+        // Pre-build the (encrypted, possibly obfuscated) REQUEST datagram once.
+        let request = {
+            let datagram = encrypt_packet(cipher, &master_key, &Control::Request.encode())
+                .map_err(|e| format!("auto-IP: failed to encrypt request: {e}"))?;
+            match obfuscator {
+                Some(ref o) => o.wrap(&datagram),
+                None => datagram,
+            }
+        };
+
+        let mut buf = vec![0u8; max_datagram_size(cipher) + obfs::MAX_HEADER];
+        for attempt in 1..=AUTO_IP_RETRIES {
+            socket
+                .send(&request)
+                .await
+                .map_err(|e| format!("auto-IP: failed to send request: {e}"))?;
+
+            match tokio::time::timeout(
+                AUTO_IP_TIMEOUT,
+                recv_assign(&socket, cipher, &master_key, &obfuscator, &mut buf),
+            )
+            .await
+            {
+                Ok(result) => return result,
+                Err(_) => logging::bridge_log(&format!(
+                    "svpn auto-IP: request attempt {attempt}/{AUTO_IP_RETRIES} timed out; retrying"
+                )),
+            }
+        }
+        Err(format!(
+            "auto-IP: no address assigned by the server after {AUTO_IP_RETRIES} attempts"
+        ))
+    })
+}
+
+/// Receive datagrams until an ASSIGN (Ok) or NAK (Err) control frame arrives,
+/// discarding stray data / keepalives / other control frames in between. Mirrors
+/// upstream `client.rs::recv_assign`, but returns only the assigned IP.
+async fn recv_assign(
+    socket: &UdpSocket,
+    cipher: crate::vendor::crypto::Cipher,
+    master_key: &[u8],
+    obfuscator: &Option<Arc<Obfuscator>>,
+    buf: &mut [u8],
+) -> Result<Ipv4Addr, String> {
+    loop {
+        let n = socket
+            .recv(buf)
+            .await
+            .map_err(|e| format!("auto-IP: recv during handshake failed: {e}"))?;
+        let decoded;
+        let datagram: &[u8] = match obfuscator {
+            Some(o) => match o.unwrap(&buf[..n]) {
+                Some(inner) => {
+                    decoded = inner;
+                    &decoded
+                }
+                None => continue,
+            },
+            None => &buf[..n],
+        };
+        let plaintext = match decrypt_packet(cipher, master_key, datagram) {
+            Ok(p) => p,
+            Err(_) => continue,
+        };
+        match control::parse(&plaintext) {
+            Some(Control::Assign { ip, .. }) => return Ok(ip),
+            Some(Control::Nak(reason)) => {
+                return Err(format!(
+                    "auto-IP: server refused assignment (reason code {reason})"
+                ))
+            }
+            _ => continue, // stray data / keepalive / request echo; keep waiting
+        }
+    }
+}
+
+/// Build the carrier obfuscator for `obfs`, logging which shaping is active.
+/// Shared by [`start`] and [`request_address`] so the handshake and the data
+/// plane always agree on the wire framing.
+fn build_obfuscator(obfs: Obfs) -> Option<Arc<Obfuscator>> {
+    match obfs {
+        Obfs::Quic => {
+            logging::bridge_log("svpn obfs: QUIC/HTTP3 datagram shaping active");
+            Some(Arc::new(Obfuscator::Quic(QuicObfs::new(
+                obfs::DEFAULT_DCID_LEN,
+            ))))
+        }
+        Obfs::Base64 => {
+            logging::bridge_log("svpn obfs: base64 plain-text shaping active");
+            Some(Arc::new(Obfuscator::Base64))
+        }
+        Obfs::None => None,
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tasks
 // ---------------------------------------------------------------------------
 
@@ -500,6 +629,15 @@ async fn egress_loop(
                 continue;
             }
         };
+
+        // Drop stray in-band control frames (e.g. a late/duplicate ASSIGN from
+        // the auto-IP handshake). An ASSIGN is exactly 20 bytes, so it slips past
+        // the sub-IP-header guard below and would otherwise be written to the TUN
+        // as a bogus IP packet. The handshake itself runs before the data plane
+        // (see `request_address`); anything control-shaped here is noise.
+        if control::is_control(&plaintext) {
+            continue;
+        }
 
         // Drop anything too small to be an IP packet (an IPv4 header alone is 20
         // bytes): keepalive echoes and sub-IP-header noise must never reach the

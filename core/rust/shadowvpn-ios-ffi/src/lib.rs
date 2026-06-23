@@ -240,6 +240,64 @@ pub unsafe extern "C" fn svpn_tun_start(
     }
 }
 
+/// Perform the auto-IP assignment handshake and write the server-assigned tunnel
+/// IPv4 address (dotted-decimal, NUL-terminated) into `out`/`out_cap`.
+///
+/// This is a standalone, blocking one-shot the NE calls **before**
+/// `setTunnelNetworkSettings` when the active profile has `auto_ip` enabled: the
+/// assigned address becomes the TUN interface address, which iOS fixes before the
+/// data plane (`svpn_tun_start`) runs. It binds its own temporary UDP socket and
+/// does the encrypted `Control::Request` → `Control::Assign` round-trip (retrying
+/// a few times), independent of any running session.
+///
+/// `config_json` is the same blob passed to `svpn_tun_start` (only `server`,
+/// `password`, `cipher`, and `obfs` are consulted here). Returns 0 on success,
+/// -1 on error (inspect `svpn_core_last_error`): a malformed config, a socket
+/// failure, a server NAK, or exhausted retries. On success the assigned address
+/// is at most 15 chars, so a 16-byte `out` always suffices.
+///
+/// # Safety
+/// `config_json` must be a NUL-terminated UTF-8 string. `out` must reference
+/// `out_cap` writable bytes if non-NULL.
+#[no_mangle]
+pub unsafe extern "C" fn svpn_request_address(
+    config_json: *const c_char,
+    out: *mut c_char,
+    out_cap: c_int,
+) -> c_int {
+    let Some(json) = cstr_to_str(config_json) else {
+        set_error("svpn_request_address: config_json is null or not utf-8".into());
+        return -1;
+    };
+    let cfg = match config::RuntimeConfig::from_json(json) {
+        Ok(c) => c,
+        Err(e) => {
+            set_error(e);
+            return -1;
+        }
+    };
+    logging::bridge_log("svpn_request_address: requesting tunnel address");
+    let ip = match engine::request_address(&cfg) {
+        Ok(ip) => ip,
+        Err(e) => {
+            logging::bridge_log(&format!("svpn_request_address ERROR: {e}"));
+            set_error(e);
+            return -1;
+        }
+    };
+    logging::bridge_log(&format!("svpn_request_address: assigned {ip}"));
+
+    let text = ip.to_string();
+    let bytes = text.as_bytes();
+    if !out.is_null() && out_cap > 0 {
+        let cap = out_cap as usize;
+        let copy = bytes.len().min(cap - 1); // leave room for the NUL
+        std::ptr::copy_nonoverlapping(bytes.as_ptr(), out as *mut u8, copy);
+        *out.add(copy) = 0;
+    }
+    0
+}
+
 /// Feed a raw IP packet from `NEPacketTunnelFlow.readPackets` into the data
 /// plane. Returns 0 if the packet was queued (or dropped under backpressure),
 /// -1 if the tunnel isn't running. Non-blocking; callers shouldn't hold
