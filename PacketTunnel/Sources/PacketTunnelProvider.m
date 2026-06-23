@@ -118,22 +118,40 @@ static const NSTimeInterval kEngineRestartDebounceS = 3.0;
     // gfwlist.txt and passes its own copy's path as gfwlist_path. nil ⇒ the
     // override is simply absent and chinadns runs its plain local-vs-clean race.
     NSURL *gfwlistURL = [self resolveBundledGfwlistURL];
-    _configJSON = [self buildConfigJSONFromConfig:cfg
-                                            mode:mode
-                                     chnrouteURL:chnrouteURL
-                                      gfwlistURL:gfwlistURL];
 
-    // Resolve the server host to dotted IPv4 literal(s). iOS rejects a bare
-    // hostname as the tunnel remote address, and the resolved IPs double as the
-    // /32 server-bypass routes so the core's carrier socket doesn't loop. Fall
-    // back to the raw host if resolution fails (the engine start will then
-    // surface the real reachability error).
+    // Resolve the server host to dotted IPv4 literal(s) BEFORE building the core
+    // config. iOS rejects a bare hostname as the tunnel remote address, and the
+    // resolved IPs double as the /32 server-bypass routes so the core's carrier
+    // socket doesn't loop. Fall back to the raw host if resolution fails (the
+    // engine start will then surface the real reachability error).
     NSString *serverHost = [self hostFromHostPort:server];
     NSArray<NSString *> *serverIPs = [self resolveIPv4ForHost:serverHost];
     NSString *remoteAddress = serverIPs.firstObject ?: serverHost;
     if (serverIPs.count == 0) {
         SVEngineLogf(SVLogError, @"NE: could not resolve server host %@ to an IPv4 address", serverHost);
     }
+
+    // Pin the core's carrier endpoint to the resolved IP (host:port -> ip:port)
+    // so svpn_tun_start never runs its own getaddrinfo. The core re-binds this
+    // socket on every wake/path-change restart; a bare hostname there means a
+    // fresh DNS lookup each time, and right after device wake DNS is not yet
+    // reachable (EAI_NONAME), so the restart failed and tore the tunnel down.
+    // Pinning to the same IP we already excluded via the /32 route keeps the two
+    // consistent and removes DNS from the restart path entirely. Falls back to
+    // the raw host:port when resolution failed.
+    NSString *pinnedServer = server;
+    if (serverIPs.count > 0) {
+        NSString *port = [self portFromHostPort:server];
+        pinnedServer = port.length > 0
+            ? [NSString stringWithFormat:@"%@:%@", serverIPs.firstObject, port]
+            : serverIPs.firstObject;
+    }
+
+    _configJSON = [self buildConfigJSONFromConfig:cfg
+                                            mode:mode
+                                     chnrouteURL:chnrouteURL
+                                      gfwlistURL:gfwlistURL
+                                   serverOverride:pinnedServer];
 
     NEPacketTunnelNetworkSettings *settings =
         [SVTunnelSettings makeWithServerAddress:remoteAddress
@@ -520,7 +538,8 @@ static const NSTimeInterval kEngineRestartDebounceS = 3.0;
 - (NSString *)buildConfigJSONFromConfig:(NSDictionary *)cfg
                                   mode:(NSString *)mode
                            chnrouteURL:(nullable NSURL *)chnrouteURL
-                            gfwlistURL:(nullable NSURL *)gfwlistURL {
+                            gfwlistURL:(nullable NSURL *)gfwlistURL
+                        serverOverride:(nullable NSString *)serverOverride {
     BOOL isSplit = [mode isEqualToString:@"chnroute"] || [mode isEqualToString:@"chinadns"];
     BOOL isChinaDns = [mode isEqualToString:@"chinadns"];
 
@@ -542,6 +561,13 @@ static const NSTimeInterval kEngineRestartDebounceS = 3.0;
         dict[@"mtu"]        = @([self integerFromConfig:cfg key:@"mtu" fallback:1400]);
         dict[@"dns_local"]  = [self stringFromConfig:cfg key:@"dns_local"  fallback:@"114.114.114.114:53"];
         dict[@"dns_remote"] = [self stringFromConfig:cfg key:@"dns_remote" fallback:@"8.8.8.8:53"];
+    }
+    // Pin the carrier endpoint to the pre-resolved IP literal so the core never
+    // does its own DNS at start/restart (see startTunnel). Applied even when the
+    // app supplied a ready config_json, so a wake-triggered restart can't fail on
+    // a stale-DNS lookup of the hostname.
+    if (serverOverride.length > 0) {
+        dict[@"server"] = serverOverride;
     }
     // Carrier obfuscation ("none" | "quic"). Injected even when the app provided
     // a ready config_json, so the core always sees the profile's choice.
@@ -586,6 +612,14 @@ static const NSTimeInterval kEngineRestartDebounceS = 3.0;
     NSRange colon = [hostPort rangeOfString:@":" options:NSBackwardsSearch];
     if (colon.location == NSNotFound) return hostPort;
     return [hostPort substringToIndex:colon.location];
+}
+
+// Extract the trailing ":port" from a "host:port" string, or @"" if absent.
+- (NSString *)portFromHostPort:(NSString *)hostPort {
+    if (hostPort.length == 0) return @"";
+    NSRange colon = [hostPort rangeOfString:@":" options:NSBackwardsSearch];
+    if (colon.location == NSNotFound) return @"";
+    return [hostPort substringFromIndex:colon.location + 1];
 }
 
 // Resolve a host to its dotted-IPv4 address(es). Returns a de-duplicated list in
