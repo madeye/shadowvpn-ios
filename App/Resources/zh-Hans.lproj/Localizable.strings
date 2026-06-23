@@ -99,8 +99,6 @@
 "settings.field.mtu" = "MTU";
 "settings.field.peerIP" = "对端 IP";
 "settings.field.peerIP.footer" = "隧道内的客户端地址，必须与服务器的 peer_ip 一致（默认 10.9.0.2），服务器才能把回包路由给你。";
-"settings.field.autoIP" = "自动分配 IP";
-"settings.field.autoIP.footer" = "连接时由服务器为本设备分配隧道 IP，这样一份配置即可在多台设备间共享。需服务器开启地址自动分配。";
 
 "settings.section.about" = "关于";
 "settings.about.version" = "版本";

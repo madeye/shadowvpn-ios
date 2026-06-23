@@ -70,18 +70,6 @@ struct ProfileURITests {
     }
 
     @Test
-    func `auto_ip maps to the profile autoIP flag`() throws {
-        let on = try ProfileURI.profile(from: makeURI([
-            "server": "h:443", "password": "p", "auto_ip": true,
-        ]))
-        #expect(on.autoIP == true)
-
-        // Absent → the Profile default (false).
-        let off = try ProfileURI.profile(from: makeURI(["server": "h:443", "password": "p"]))
-        #expect(off.autoIP == false)
-    }
-
-    @Test
     func `gfwlist mode falls back to the default since iOS lacks it`() throws {
         let uri = try makeURI(["server": "h:1", "password": "p", "mode": "gfwlist"])
         let profile = try ProfileURI.profile(from: uri)

@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: MIT
 //
 // vendored from madeye/shadowvpn (https://github.com/madeye/shadowvpn),
-// synced 2026-06-23 from upstream main @ e26fa45 (bodies unchanged since 212e06d
-// / v0.1.1; e26fa45 only added the uri.rs/config.rs URI feature, not vendored),
+// synced 2026-06-23 from upstream main @ 3bb09fe (bodies unchanged since 212e06d
+// / v0.1.1; upstream since then only changed non-vendored files — uri, config,
+// control, nat — the last of which moved client identity fully server-side),
 // unmodified except this provenance header and the `crate::`→`super::`
 // module-path rewrites the vendor layout needs. Upstream is MIT-licensed (see
 // that repo's
