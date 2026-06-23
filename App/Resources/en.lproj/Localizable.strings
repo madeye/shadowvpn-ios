@@ -39,6 +39,20 @@
 "profiles.row.active" = "Active";
 "profiles.row.noServer" = "No server configured";
 "profiles.new.defaultName" = "New Profile";
+"profiles.scan" = "Scan QR Code";
+
+/* QR scanner */
+"scan.nav.title" = "Scan QR Code";
+"scan.cancel" = "Cancel";
+"scan.hint" = "Point the camera at a shadowvpn:// QR code";
+"scan.openSettings" = "Open Settings";
+"scan.denied.title" = "Camera Access Denied";
+"scan.denied.message" = "Allow camera access in Settings to scan a configuration QR code.";
+"scan.unavailable.title" = "Camera Unavailable";
+"scan.unavailable.message" = "This device has no camera available for scanning.";
+"scan.failed.title" = "Couldn't Read Code";
+"scan.failed.message" = "That QR code isn't a valid shadowvpn:// configuration.";
+"scan.failed.dismiss" = "OK";
 
 /* Profile editor */
 "editor.nav.title" = "Edit Profile";

@@ -39,6 +39,20 @@
 "profiles.row.active" = "使用中";
 "profiles.row.noServer" = "未配置服务器";
 "profiles.new.defaultName" = "新配置";
+"profiles.scan" = "扫描二维码";
+
+/* QR scanner */
+"scan.nav.title" = "扫描二维码";
+"scan.cancel" = "取消";
+"scan.hint" = "将相机对准 shadowvpn:// 二维码";
+"scan.openSettings" = "打开设置";
+"scan.denied.title" = "相机访问被拒绝";
+"scan.denied.message" = "请在“设置”中允许访问相机，以扫描配置二维码。";
+"scan.unavailable.title" = "相机不可用";
+"scan.unavailable.message" = "此设备没有可用于扫描的相机。";
+"scan.failed.title" = "无法识别二维码";
+"scan.failed.message" = "该二维码不是有效的 shadowvpn:// 配置。";
+"scan.failed.dismiss" = "好";
 
 /* Profile editor */
 "editor.nav.title" = "编辑配置";

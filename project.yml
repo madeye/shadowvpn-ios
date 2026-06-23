@@ -75,7 +75,7 @@ targets:
       properties:
         CFBundleDisplayName: ShadowVPN
         CFBundleShortVersionString: "1.0.0"
-        CFBundleVersion: "2026061901"
+        CFBundleVersion: "2026062201"
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
         UILaunchScreen:
@@ -90,6 +90,8 @@ targets:
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: false
           NSAllowsLocalNetworking: true
+        # Camera is used only to scan a shadowvpn:// QR code into a profile.
+        NSCameraUsageDescription: ShadowVPN uses the camera to scan a shadowvpn:// QR code and import a connection profile.
         # ShadowVPN ships standard AEAD (chacha20-poly1305 / aes-gcm); claim the
         # exemption so App Store Connect skips the export-compliance prompt.
         ITSAppUsesNonExemptEncryption: false
@@ -171,7 +173,7 @@ targets:
       properties:
         CFBundleDisplayName: ShadowVPN Tunnel
         CFBundleShortVersionString: "1.0.0"
-        CFBundleVersion: "2026061901"
+        CFBundleVersion: "2026062201"
         NSExtension:
           NSExtensionPointIdentifier: com.apple.networkextension.packet-tunnel
           NSExtensionPrincipalClass: PacketTunnelProvider
