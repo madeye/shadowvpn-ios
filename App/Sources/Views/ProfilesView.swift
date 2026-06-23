@@ -13,6 +13,17 @@ struct ProfilesView: View {
     /// `Profile` is `Identifiable`, so it drives `.sheet(item:)` directly.
     @State private var editing: Profile?
 
+    /// Whether the QR-scanner sheet is presented.
+    @State private var scanning = false
+
+    /// A profile decoded from a scanned `shadowvpn://` QR, parked here until the
+    /// scanner sheet finishes dismissing so the editor can open over it (two
+    /// sheets can't be presented at once).
+    @State private var scannedProfile: Profile?
+
+    /// Whether to show the "couldn't read that code" alert after a failed scan.
+    @State private var scanFailed = false
+
     var body: some View {
         List {
             Section {
@@ -50,6 +61,14 @@ struct ProfilesView: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button {
+                    scanning = true
+                } label: {
+                    Label("profiles.scan", systemImage: "qrcode.viewfinder")
+                }
+                .accessibilityIdentifier("profiles.scan")
+            }
+            ToolbarItem(placement: .primaryAction) {
+                Button {
                     editing = appModel.draftProfile()
                 } label: {
                     Label("profiles.add", systemImage: "plus")
@@ -62,6 +81,34 @@ struct ProfilesView: View {
                 ProfileEditorView(profileID: profile.id, profile: profile)
             }
         }
+        .sheet(isPresented: $scanning, onDismiss: presentScannedProfile) {
+            QRScannerView(onScan: handleScan)
+        }
+        .alert("scan.failed.title", isPresented: $scanFailed) {
+            Button("scan.failed.dismiss", role: .cancel) {}
+        } message: {
+            Text("scan.failed.message")
+        }
+    }
+
+    /// Decode the scanned payload into a ``Profile``. On success it's parked in
+    /// ``scannedProfile`` and opened in the editor once the scanner dismisses; a
+    /// payload that isn't a valid `shadowvpn://` config raises the failure alert.
+    private func handleScan(_ payload: String) {
+        do {
+            scannedProfile = try ProfileURI.profile(from: payload)
+        } catch {
+            scanFailed = true
+        }
+    }
+
+    /// Open the editor over a freshly scanned profile (deferred to the scanner
+    /// sheet's `onDismiss` so the two sheets don't overlap). The user reviews and
+    /// saves it like any new profile; cancelling discards it.
+    private func presentScannedProfile() {
+        guard let profile = scannedProfile else { return }
+        scannedProfile = nil
+        editing = profile
     }
 }
 
