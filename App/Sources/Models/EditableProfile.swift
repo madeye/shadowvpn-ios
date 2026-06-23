@@ -28,8 +28,11 @@ final class EditableProfile {
     var mtuText: String
     /// Carrier obfuscation applied to every datagram on the wire.
     var obfuscation: Obfuscation
-    /// Tunnel inner client IP (must match the server's `peer_ip`).
+    /// Tunnel inner client IP (must match the server's `peer_ip`). Ignored when
+    /// ``autoIP`` is on.
     var peerIP: String
+    /// Whether the server auto-assigns the tunnel IP (upstream PR #20).
+    var autoIP: Bool
 
     /// Seed the form from an existing ``Profile``.
     init(_ profile: Profile) {
@@ -46,6 +49,7 @@ final class EditableProfile {
         mtuText = String(profile.mtu)
         obfuscation = profile.obfuscation
         peerIP = profile.peerIP
+        autoIP = profile.autoIP
     }
 
     /// Parsed port, or the wire default when the field is blank/garbage. Never
@@ -97,6 +101,7 @@ final class EditableProfile {
             peerIP: peerIP.trimmingCharacters(in: .whitespaces).isEmpty
                 ? Profile.defaultPeerIP
                 : peerIP.trimmingCharacters(in: .whitespaces),
+            autoIP: autoIP,
         )
     }
 

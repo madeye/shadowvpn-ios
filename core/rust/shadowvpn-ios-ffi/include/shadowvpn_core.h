@@ -25,6 +25,21 @@
 #define MAX_HEADER ((1 + 20) + 4)
 
 /**
+ * Control-protocol version. Bumped only on an incompatible frame change.
+ */
+#define VERSION 1
+
+/**
+ * No free address remained in the server's pool.
+ */
+#define POOL_EXHAUSTED 1
+
+/**
+ * The server is not configured to assign addresses.
+ */
+#define NOT_ENABLED 2
+
+/**
  * AEAD nonce length in bytes. All supported ciphers use a 12-byte nonce.
  */
 #define NONCE_LEN 12
@@ -141,6 +156,29 @@ int svpn_country_cidrs_file(const char *mmdb_path,
  * `config_json` must be a NUL-terminated UTF-8 string.
  */
 int svpn_tun_start(void *ctx, SvpnWritePacket cb, const char *config_json);
+
+/**
+ * Perform the auto-IP assignment handshake and write the server-assigned tunnel
+ * IPv4 address (dotted-decimal, NUL-terminated) into `out`/`out_cap`.
+ *
+ * This is a standalone, blocking one-shot the NE calls **before**
+ * `setTunnelNetworkSettings` when the active profile has `auto_ip` enabled: the
+ * assigned address becomes the TUN interface address, which iOS fixes before the
+ * data plane (`svpn_tun_start`) runs. It binds its own temporary UDP socket and
+ * does the encrypted `Control::Request` → `Control::Assign` round-trip (retrying
+ * a few times), independent of any running session.
+ *
+ * `config_json` is the same blob passed to `svpn_tun_start` (only `server`,
+ * `password`, `cipher`, and `obfs` are consulted here). Returns 0 on success,
+ * -1 on error (inspect `svpn_core_last_error`): a malformed config, a socket
+ * failure, a server NAK, or exhausted retries. On success the assigned address
+ * is at most 15 chars, so a 16-byte `out` always suffices.
+ *
+ * # Safety
+ * `config_json` must be a NUL-terminated UTF-8 string. `out` must reference
+ * `out_cap` writable bytes if non-NULL.
+ */
+int svpn_request_address(const char *config_json, char *out, int out_cap);
 
 /**
  * Feed a raw IP packet from `NEPacketTunnelFlow.readPackets` into the data

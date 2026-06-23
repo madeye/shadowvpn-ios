@@ -32,6 +32,8 @@
 //! * [`gfwlist`] — the `GfwList` domain-suffix set used as a chinadns
 //!   force-tunnel override (upstream PR #17).
 //! * [`dns`] — read-only DNS wire helpers (`question`, `a_records`, `min_ttl`).
+//! * [`control`] — in-band control frames (`Control`, `is_control`, `parse`) for
+//!   the auto-IP assignment handshake (upstream PR #20).
 
 // These modules are kept VERBATIM from upstream so they track its crypto/DNS
 // wire behavior; the data plane only calls a subset of their public API
@@ -39,6 +41,8 @@
 // `contains`/`from_lines`). The unused upstream helpers (`build_query`,
 // `min_ttl`, `from_ranges`, …) are intentionally retained rather than deleted —
 // `allow(dead_code)` silences the warnings without diverging from upstream.
+#[allow(dead_code)]
+pub mod control;
 #[allow(dead_code)]
 pub mod crypto;
 #[allow(dead_code)]

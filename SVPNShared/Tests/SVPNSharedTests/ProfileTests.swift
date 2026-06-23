@@ -16,6 +16,7 @@ struct ProfileTests {
             dnsLocal: "223.5.5.5:53",
             dnsRemote: "1.1.1.1:53",
             mtu: 1380,
+            autoIP: true,
         )
 
         let data = try JSONEncoder().encode(profile)
@@ -24,6 +25,7 @@ struct ProfileTests {
         #expect(decoded == profile)
         #expect(decoded.cipher == .aes256gcm)
         #expect(decoded.mode == .chinadns)
+        #expect(decoded.autoIP == true)
         #expect(decoded.serverAddress == "example.com:9999")
     }
 
