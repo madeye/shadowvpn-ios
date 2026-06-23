@@ -99,8 +99,6 @@ private struct FileConfig: Decodable {
     var mtu: Int?
     /// ISO 3166-1 alpha-2 country selected from the GeoIP database.
     var geoipCountry: String?
-    /// Whether the server auto-assigns the tunnel IP (upstream PR #20).
-    var autoIP: Bool?
 
     enum CodingKeys: String, CodingKey {
         case server, password, cipher, obfs, mode, mtu
@@ -108,7 +106,6 @@ private struct FileConfig: Decodable {
         case dnsRemote = "dns_remote"
         case peerIP = "peer_ip"
         case geoipCountry = "geoip_country"
-        case autoIP = "auto_ip"
     }
 
     /// Map the decoded config onto a fresh ``Profile``. Every field is tolerant:
@@ -143,7 +140,6 @@ private struct FileConfig: Decodable {
             bypassCountry: geoipCountry?.nonEmpty.map { $0.uppercased() } ?? defaults.bypassCountry,
             obfuscation: resolvedObfs,
             peerIP: peerIP?.nonEmpty ?? defaults.peerIP,
-            autoIP: autoIP ?? defaults.autoIP,
         )
     }
 

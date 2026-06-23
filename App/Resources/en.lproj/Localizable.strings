@@ -99,8 +99,6 @@
 "settings.field.mtu" = "MTU";
 "settings.field.peerIP" = "Peer IP";
 "settings.field.peerIP.footer" = "The tunnel's inner client address. Must match the server's peer_ip (default 10.9.0.2) so the server can route replies back to you.";
-"settings.field.autoIP" = "Auto-assign IP";
-"settings.field.autoIP.footer" = "Let the server lease this device a tunnel IP on connect, so one profile can be shared across devices. Requires a server configured to auto-assign addresses.";
 
 "settings.section.about" = "About";
 "settings.about.version" = "Version";

@@ -105,9 +105,6 @@ static const NSTimeInterval kEngineRestartDebounceS = 3.0;
     // return traffic routes back down the tunnel. Defaults to the reference
     // server's peer_ip.
     NSString *peerIP = [self stringFromConfig:cfg key:@"peer_ip" fallback:@"10.9.0.2"];
-    // When set, ask the server to lease the tunnel IP (upstream PR #20) instead
-    // of using the static peer_ip — so one profile works on multiple devices.
-    BOOL autoIP = [self boolFromConfig:cfg key:@"auto_ip" fallback:NO];
     _profileID   = [self stringFromConfig:cfg key:@"profileID"   fallback:nil];
     _profileName = [self stringFromConfig:cfg key:@"profileName" fallback:nil];
 
@@ -156,108 +153,65 @@ static const NSTimeInterval kEngineRestartDebounceS = 3.0;
                                       gfwlistURL:gfwlistURL
                                    serverOverride:pinnedServer];
 
+    NEPacketTunnelNetworkSettings *settings =
+        [SVTunnelSettings makeWithServerAddress:remoteAddress
+                                       tunnelIP:peerIP
+                                          mode:mode
+                                      dnsLocal:dnsLocal
+                                     dnsRemote:dnsRemote
+                                           mtu:mtu
+                                   chnrouteURL:chnrouteURL
+                              serverExclusions:serverIPs];
+
     [self writeState:@"connecting" errorMessage:nil];
 
     __weak __typeof__(self) weak = self;
-
-    // Build the tunnel settings for `tunnelIP` and bring the data plane up. The
-    // inner IP is either the profile's static peer_ip or — in auto-IP mode — the
-    // address the server just leased us via the handshake below.
-    void (^applySettingsAndStart)(NSString *) = ^(NSString *tunnelIP) {
-        __strong __typeof__(weak) strongSelf = weak;
-        if (!strongSelf) { completionHandler(nil); return; }
-
-        NEPacketTunnelNetworkSettings *settings =
-            [SVTunnelSettings makeWithServerAddress:remoteAddress
-                                           tunnelIP:tunnelIP
-                                              mode:mode
-                                          dnsLocal:dnsLocal
-                                         dnsRemote:dnsRemote
-                                               mtu:mtu
-                                       chnrouteURL:chnrouteURL
-                                  serverExclusions:serverIPs];
-
-        [strongSelf setTunnelNetworkSettings:settings completionHandler:^(NSError *settingsErr) {
-            __strong __typeof__(weak) strong0 = weak;
-            if (!strong0) { completionHandler(settingsErr); return; }
-            if (settingsErr) {
-                os_log_error(gLog, "setTunnelNetworkSettings failed: %{public}@",
-                             settingsErr.localizedDescription);
-                SVEngineLogf(SVLogError, @"NE: setTunnelNetworkSettings failed: %@",
-                             settingsErr.localizedDescription);
-                [strong0 writeState:@"error" errorMessage:settingsErr.localizedDescription];
-                completionHandler(settingsErr);
-                return;
-            }
-            dispatch_async(strong0->_engineControlQueue, ^{
-                __strong __typeof__(weak) self = weak;
-                if (!self) { completionHandler(nil); return; }
-
-                SVTunnelEngine *engine =
-                    [[SVTunnelEngine alloc] initWithPacketFlow:self.packetFlow
-                                                   configJSON:self->_configJSON];
-                NSError *startErr = nil;
-                if (![engine startWithError:&startErr]) {
-                    os_log_error(gLog, "engine start failed: %{public}@",
-                                 startErr.localizedDescription);
-                    SVEngineLogf(SVLogError, @"NE: engine start failed: %@",
-                                 startErr.localizedDescription);
-                    [self writeState:@"error" errorMessage:startErr.localizedDescription];
-                    completionHandler(startErr);
-                    return;
-                }
-                self->_engine = engine;
-
-                // The app's only in-process command is "stop"; wire it through the
-                // command Darwin notification to a clean tunnel cancel.
-                SVIPCListener *listener = [[SVIPCListener alloc] initWithHandler:^{
-                    __strong __typeof__(weak) self = weak;
-                    if (self) [self cancelTunnelWithError:nil];
-                }];
-                [listener start];
-                self->_ipcListener = listener;
-
-                [self startPathMonitor];
-
-                [self writeState:@"connected" errorMessage:nil];
-                completionHandler(nil);
-            });
-        }];
-    };
-
-    if (!autoIP) {
-        applySettingsAndStart(peerIP);
-        return;
-    }
-
-    // Auto-IP: run the (blocking) lease handshake on a background queue BEFORE
-    // setTunnelNetworkSettings — the assigned address becomes the TUN address, so
-    // it must be known before the tunnel claims the default route (which would
-    // also blackhole the handshake's own carrier socket). On failure the tunnel
-    // can't come up, so surface the error and bail.
-    NSString *handshakeJSON = _configJSON;
-    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-        __strong __typeof__(weak) self = weak;
-        if (!self) { completionHandler(nil); return; }
-        char ipbuf[16] = {0};
-        SVEngineLog(SVLogInfo, @"NE: auto-IP — requesting tunnel address from server");
-        int rc = svpn_request_address(handshakeJSON.UTF8String, ipbuf, (int)sizeof(ipbuf));
-        if (rc != 0) {
-            const char *cerr = svpn_core_last_error();
-            NSString *msg = (cerr && cerr[0]) ? @(cerr) : @"auto-IP assignment failed";
-            os_log_error(gLog, "auto-IP failed: %{public}@", msg);
-            SVEngineLogf(SVLogError, @"NE: auto-IP failed: %@", msg);
-            [self writeState:@"error" errorMessage:msg];
-            completionHandler([NSError errorWithDomain:@"com.tangzixiang.shadowvpn"
-                                                  code:-1
-                                              userInfo:@{NSLocalizedDescriptionKey: msg}]);
+    [self setTunnelNetworkSettings:settings completionHandler:^(NSError *settingsErr) {
+        __strong __typeof__(weak) strong0 = weak;
+        if (!strong0) { completionHandler(settingsErr); return; }
+        if (settingsErr) {
+            os_log_error(gLog, "setTunnelNetworkSettings failed: %{public}@",
+                         settingsErr.localizedDescription);
+            SVEngineLogf(SVLogError, @"NE: setTunnelNetworkSettings failed: %@",
+                         settingsErr.localizedDescription);
+            [strong0 writeState:@"error" errorMessage:settingsErr.localizedDescription];
+            completionHandler(settingsErr);
             return;
         }
-        NSString *assigned = @(ipbuf);
-        SVEngineLogf(SVLogInfo, @"NE: auto-IP — server assigned %@", assigned);
-        // Hop back to the provider's main queue to apply the tunnel settings.
-        dispatch_async(dispatch_get_main_queue(), ^{ applySettingsAndStart(assigned); });
-    });
+        dispatch_async(strong0->_engineControlQueue, ^{
+            __strong __typeof__(weak) self = weak;
+            if (!self) { completionHandler(nil); return; }
+
+            SVTunnelEngine *engine =
+                [[SVTunnelEngine alloc] initWithPacketFlow:self.packetFlow
+                                               configJSON:self->_configJSON];
+            NSError *startErr = nil;
+            if (![engine startWithError:&startErr]) {
+                os_log_error(gLog, "engine start failed: %{public}@",
+                             startErr.localizedDescription);
+                SVEngineLogf(SVLogError, @"NE: engine start failed: %@",
+                             startErr.localizedDescription);
+                [self writeState:@"error" errorMessage:startErr.localizedDescription];
+                completionHandler(startErr);
+                return;
+            }
+            self->_engine = engine;
+
+            // The app's only in-process command is "stop"; wire it through the
+            // command Darwin notification to a clean tunnel cancel.
+            SVIPCListener *listener = [[SVIPCListener alloc] initWithHandler:^{
+                __strong __typeof__(weak) self = weak;
+                if (self) [self cancelTunnelWithError:nil];
+            }];
+            [listener start];
+            self->_ipcListener = listener;
+
+            [self startPathMonitor];
+
+            [self writeState:@"connected" errorMessage:nil];
+            completionHandler(nil);
+        });
+    }];
 }
 
 - (void)stopTunnelWithReason:(NEProviderStopReason)reason
@@ -648,15 +602,6 @@ static const NSTimeInterval kEngineRestartDebounceS = 3.0;
     id v = cfg[key];
     if ([v isKindOfClass:[NSNumber class]]) return [(NSNumber *)v integerValue];
     if ([v isKindOfClass:[NSString class]]) return [(NSString *)v integerValue];
-    return fallback;
-}
-
-- (BOOL)boolFromConfig:(NSDictionary *)cfg
-                   key:(NSString *)key
-              fallback:(BOOL)fallback {
-    id v = cfg[key];
-    if ([v isKindOfClass:[NSNumber class]]) return [(NSNumber *)v boolValue];
-    if ([v isKindOfClass:[NSString class]]) return [(NSString *)v boolValue];
     return fallback;
 }
 

@@ -271,12 +271,7 @@ final class VpnManager {
             config["obfs"] = profile.obfuscation.rawValue
             // Tunnel inner client IP (the NE TUN address); must match the
             // server's peer_ip so return traffic routes back down the tunnel.
-            // Ignored by the extension when auto_ip is set.
             config["peer_ip"] = profile.peerIP
-            // When set, the extension asks the server to lease the tunnel IP via
-            // the auto-IP handshake (svpn_request_address) instead of using
-            // peer_ip — so one profile can be shared across devices.
-            config["auto_ip"] = profile.autoIP
             config["profileID"] = profile.id.uuidString
             config["profileName"] = profile.name
         }
