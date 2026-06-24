@@ -75,7 +75,7 @@ targets:
       properties:
         CFBundleDisplayName: ShadowVPN
         CFBundleShortVersionString: "1.0.0"
-        CFBundleVersion: "2026062201"
+        CFBundleVersion: "2026062401"
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
         UILaunchScreen:
@@ -173,7 +173,7 @@ targets:
       properties:
         CFBundleDisplayName: ShadowVPN Tunnel
         CFBundleShortVersionString: "1.0.0"
-        CFBundleVersion: "2026062201"
+        CFBundleVersion: "2026062401"
         NSExtension:
           NSExtensionPointIdentifier: com.apple.networkextension.packet-tunnel
           NSExtensionPrincipalClass: PacketTunnelProvider
