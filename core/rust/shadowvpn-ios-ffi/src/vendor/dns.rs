@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
 //
 // vendored from madeye/shadowvpn (https://github.com/madeye/shadowvpn),
-// synced 2026-06-23 from upstream main @ 3bb09fe (bodies unchanged since 212e06d
-// / v0.1.1; upstream since then only changed non-vendored files — uri, config,
-// control, nat — the last of which moved client identity fully server-side),
+// synced 2026-06-24 from upstream main @ 7571f79 (this module's body is unchanged
+// since 212e06d/v0.1.1; the #25/#26 perf reworks touched crypto.rs and
+// non-vendored files only),
 // byte-identical to src/policy/dns.rs except this provenance header. Upstream
 // is MIT-licensed (see that repo's
 // LICENSE). Kept verbatim so it tracks upstream's crypto/DNS wire behavior;
