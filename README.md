@@ -8,6 +8,19 @@ optional ChinaDNS split) lives in a small Rust core wrapped as
 
 See [`DESIGN.md`](DESIGN.md) for the full blueprint.
 
+## Public beta
+
+ShadowVPN is in open **TestFlight** beta — install it on your iPhone or iPad:
+
+[![Join the TestFlight beta](https://img.shields.io/badge/TestFlight-Join%20the%20beta-35dcc8?logo=apple&logoColor=white)](https://testflight.apple.com/join/anD9vU5M)
+
+- **Beta:** <https://testflight.apple.com/join/anD9vU5M>
+- **Landing page:** <https://madeye.github.io/shadowvpn-ios/> (served from [`docs/`](docs/))
+
+It's bring-your-own-server: run the open-source
+[ShadowVPN server](https://github.com/madeye/shadowvpn), then point the app at it
+(enter the details or scan a `shadowvpn://` QR code). No account required.
+
 ## Layout
 
 ```
@@ -18,6 +31,7 @@ ShadowVPNCore/    C header + XCFramework for the Rust core
 Shared/Resources/ chnroute.txt (CN CIDR set) + gfwlist.txt, bundled into the extension
 core/rust/        shadowvpn-ios-ffi (the C-ABI crate) + chnroute-gen
 scripts/          build-rust.sh, generate-xcodeproj.sh, gen-gfwlist.sh
+docs/             GitHub Pages landing page (index.html + assets)
 ```
 
 ## Building

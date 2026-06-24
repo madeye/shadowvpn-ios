@@ -1,0 +1,310 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ShadowVPN — a fast, self-hosted VPN for iOS</title>
+<meta name="description" content="A minimal, fast, self-hosted VPN client for iPhone & iPad, built on the ShadowVPN protocol — a UDP, pre-shared-key tunnel using shadowsocks AEAD encryption. Bring your own server. Now in public TestFlight beta." />
+<link rel="icon" href="assets/icon.png" />
+
+<!-- Open Graph / social -->
+<meta property="og:type" content="website" />
+<meta property="og:title" content="ShadowVPN — a fast, self-hosted VPN for iOS" />
+<meta property="og:description" content="Bring your own server. A minimal, fast, on-device VPN client using the shadowsocks AEAD UDP scheme. Public TestFlight beta is open." />
+<meta property="og:image" content="assets/icon.png" />
+
+<style>
+  :root{
+    --bg:#070b12;
+    --bg-2:#0b121d;
+    --panel:#101a28;
+    --panel-2:#0d1622;
+    --line:#1d2c3f;
+    --text:#e9eff6;
+    --muted:#93a6bc;
+    --teal:#35dcc8;
+    --teal-soft:#7af0e0;
+    --blue:#2f74e6;
+    --radius:18px;
+    --maxw:1080px;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0;
+    font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    color:var(--text);
+    background:var(--bg);
+    -webkit-font-smoothing:antialiased;
+    line-height:1.55;
+  }
+  a{color:inherit}
+  .wrap{max-width:var(--maxw);margin:0 auto;padding:0 22px}
+  .muted{color:var(--muted)}
+
+  /* ---- nav ---- */
+  nav{
+    position:sticky;top:0;z-index:10;
+    backdrop-filter:saturate(140%) blur(12px);
+    background:rgba(7,11,18,.72);
+    border-bottom:1px solid var(--line);
+  }
+  nav .wrap{display:flex;align-items:center;gap:14px;height:62px}
+  .brand{display:flex;align-items:center;gap:11px;font-weight:650;letter-spacing:.2px}
+  .brand img{width:30px;height:30px;border-radius:8px}
+  nav .spacer{flex:1}
+  nav a.navlink{color:var(--muted);text-decoration:none;font-size:14px;margin-left:18px}
+  nav a.navlink:hover{color:var(--text)}
+  @media (max-width:620px){nav a.navlink{display:none}}
+
+  /* ---- buttons ---- */
+  .btn{
+    display:inline-flex;align-items:center;gap:9px;
+    font-weight:600;font-size:15px;text-decoration:none;
+    padding:13px 22px;border-radius:12px;border:1px solid transparent;
+    transition:transform .12s ease, box-shadow .12s ease, background .12s ease;
+    white-space:nowrap;
+  }
+  .btn:active{transform:translateY(1px)}
+  .btn-primary{
+    color:#04130f;
+    background:linear-gradient(180deg,var(--teal-soft),var(--teal));
+    box-shadow:0 10px 30px -10px rgba(53,220,200,.55);
+  }
+  .btn-primary:hover{box-shadow:0 14px 38px -10px rgba(53,220,200,.7)}
+  .btn-ghost{color:var(--text);border-color:var(--line);background:rgba(255,255,255,.02)}
+  .btn-ghost:hover{border-color:#2c4156;background:rgba(255,255,255,.05)}
+  .btn-sm{padding:9px 16px;font-size:14px}
+
+  /* ---- hero ---- */
+  header.hero{position:relative;overflow:hidden;border-bottom:1px solid var(--line)}
+  header.hero::before{
+    /* teal ring glow echoing the app icon */
+    content:"";position:absolute;left:50%;top:-160px;transform:translateX(-50%);
+    width:760px;height:760px;border-radius:50%;
+    background:radial-gradient(circle at center, rgba(53,220,200,.20), rgba(47,116,230,.10) 42%, transparent 64%);
+    filter:blur(6px);pointer-events:none;
+  }
+  .hero .wrap{position:relative;text-align:center;padding:74px 22px 80px}
+  .appicon{
+    width:120px;height:120px;border-radius:27px;
+    box-shadow:0 30px 70px -24px rgba(53,220,200,.5), 0 0 0 1px rgba(255,255,255,.05) inset;
+    margin-bottom:26px;
+  }
+  .pill{
+    display:inline-flex;align-items:center;gap:8px;
+    font-size:12.5px;font-weight:600;letter-spacing:.4px;text-transform:uppercase;
+    color:var(--teal-soft);background:rgba(53,220,200,.10);
+    border:1px solid rgba(53,220,200,.28);border-radius:999px;padding:6px 13px;margin-bottom:22px;
+  }
+  .pill .dot{width:7px;height:7px;border-radius:50%;background:var(--teal);box-shadow:0 0 10px var(--teal)}
+  h1{font-size:clamp(36px,6vw,60px);line-height:1.04;margin:0 0 16px;letter-spacing:-1.2px;font-weight:740}
+  h1 .grad{background:linear-gradient(120deg,var(--teal-soft),var(--blue));-webkit-background-clip:text;background-clip:text;color:transparent}
+  .sub{font-size:clamp(16px,2.4vw,20px);color:var(--muted);max-width:640px;margin:0 auto 32px}
+  .cta{display:flex;gap:14px;justify-content:center;flex-wrap:wrap}
+  .heronote{margin-top:18px;font-size:13.5px;color:var(--muted)}
+  .heronote b{color:var(--text);font-weight:600}
+
+  /* ---- sections ---- */
+  section{padding:78px 0;border-bottom:1px solid var(--line)}
+  .eyebrow{color:var(--teal);font-weight:650;font-size:13px;letter-spacing:1.4px;text-transform:uppercase;margin:0 0 10px}
+  h2{font-size:clamp(26px,3.6vw,36px);letter-spacing:-.6px;margin:0 0 14px;font-weight:720}
+  .lead{color:var(--muted);max-width:620px;font-size:16.5px;margin:0 0 40px}
+
+  /* features */
+  .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+  @media (max-width:820px){.grid{grid-template-columns:repeat(2,1fr)}}
+  @media (max-width:520px){.grid{grid-template-columns:1fr}}
+  .card{
+    background:linear-gradient(180deg,var(--panel),var(--panel-2));
+    border:1px solid var(--line);border-radius:var(--radius);padding:22px;
+    transition:transform .14s ease, border-color .14s ease;
+  }
+  .card:hover{transform:translateY(-3px);border-color:#28415a}
+  .ic{
+    width:42px;height:42px;border-radius:11px;display:grid;place-items:center;margin-bottom:14px;
+    background:rgba(53,220,200,.10);border:1px solid rgba(53,220,200,.22);
+  }
+  .ic svg{width:22px;height:22px;stroke:var(--teal);fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+  .card h3{margin:0 0 6px;font-size:17px;font-weight:650}
+  .card p{margin:0;color:var(--muted);font-size:14.5px}
+
+  /* screenshots */
+  .shots{display:flex;gap:20px;overflow-x:auto;padding:6px 2px 14px;scroll-snap-type:x mandatory}
+  .shot{flex:0 0 auto;scroll-snap-align:center;text-align:center}
+  .shot img{
+    width:232px;border-radius:30px;border:1px solid var(--line);
+    box-shadow:0 26px 60px -28px rgba(0,0,0,.8);background:#000;display:block;
+  }
+  .shot span{display:block;margin-top:12px;color:var(--muted);font-size:13.5px}
+
+  /* steps */
+  .steps{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;counter-reset:s}
+  @media (max-width:760px){.steps{grid-template-columns:1fr}}
+  .step{background:var(--panel-2);border:1px solid var(--line);border-radius:var(--radius);padding:24px}
+  .step .n{
+    counter-increment:s;font-variant-numeric:tabular-nums;
+    width:34px;height:34px;border-radius:10px;display:grid;place-items:center;
+    font-weight:700;color:var(--teal);background:rgba(53,220,200,.1);border:1px solid rgba(53,220,200,.25);margin-bottom:14px;
+  }
+  .step .n::before{content:counter(s)}
+  .step h3{margin:0 0 6px;font-size:17px}
+  .step p{margin:0;color:var(--muted);font-size:14.5px}
+
+  /* beta band */
+  .band{
+    background:linear-gradient(180deg,rgba(53,220,200,.07),rgba(47,116,230,.05));
+    text-align:center;
+  }
+  .band .qr{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--teal-soft);font-size:14px;word-break:break-all}
+
+  footer{padding:46px 0;color:var(--muted);font-size:14px}
+  footer .wrap{display:flex;flex-wrap:wrap;gap:14px 26px;align-items:center}
+  footer a{color:var(--muted);text-decoration:none}
+  footer a:hover{color:var(--text)}
+  footer .spacer{flex:1}
+  .disc{font-size:12.5px;color:#5f7186;max-width:var(--maxw);margin:0 auto;padding:0 22px 40px}
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <a class="brand" href="#top" style="text-decoration:none">
+      <img src="assets/icon.png" alt="ShadowVPN icon" />
+      <span>ShadowVPN</span>
+    </a>
+    <span class="spacer"></span>
+    <a class="navlink" href="#features">Features</a>
+    <a class="navlink" href="#screens">Screens</a>
+    <a class="navlink" href="#start">Get started</a>
+    <a class="navlink" href="https://github.com/madeye/shadowvpn-ios">GitHub</a>
+    <a class="btn btn-primary btn-sm" href="https://testflight.apple.com/join/anD9vU5M">Join the beta</a>
+  </div>
+</nav>
+
+<header class="hero" id="top">
+  <div class="wrap">
+    <img class="appicon" src="assets/icon.png" alt="ShadowVPN app icon" />
+    <div class="pill"><span class="dot"></span> Public TestFlight beta</div>
+    <h1>A fast, <span class="grad">self-hosted VPN</span><br/>for iPhone &amp; iPad</h1>
+    <p class="sub">ShadowVPN is a minimal UDP tunnel built on the shadowsocks AEAD scheme. You bring your own server — nothing is proxied through us, and there's no account to create.</p>
+    <div class="cta">
+      <a class="btn btn-primary" href="https://testflight.apple.com/join/anD9vU5M">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2 3 7v6c0 5 3.8 8.4 9 9 5.2-.6 9-4 9-9V7l-9-5Z"/></svg>
+        Join the TestFlight beta
+      </a>
+      <a class="btn btn-ghost" href="https://github.com/madeye/shadowvpn-ios">View on GitHub</a>
+    </div>
+    <p class="heronote">Requires <b>iOS&nbsp;17+</b> and TestFlight · <b>Bring your own</b> ShadowVPN server</p>
+  </div>
+</header>
+
+<section id="features">
+  <div class="wrap">
+    <p class="eyebrow">Why ShadowVPN</p>
+    <h2>Small, transparent, and entirely yours</h2>
+    <p class="lead">A SwiftUI app driving Apple's Network Extension, with a compact Rust core for the data plane. No SOCKS layer, no userland TCP stack, no telemetry.</p>
+    <div class="grid">
+      <div class="card">
+        <div class="ic"><svg viewBox="0 0 24 24"><path d="M13 2 4 14h6l-1 8 9-12h-6l1-8Z"/></svg></div>
+        <h3>Fast UDP tunnel</h3>
+        <p>A lightweight raw-IP data plane — one IP packet per datagram, no proxy overhead.</p>
+      </div>
+      <div class="card">
+        <div class="ic"><svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg></div>
+        <h3>Strong encryption</h3>
+        <p>shadowsocks AEAD ciphers (AES-GCM, ChaCha20-Poly1305) protect every datagram.</p>
+      </div>
+      <div class="card">
+        <div class="ic"><svg viewBox="0 0 24 24"><path d="M4 7h7l3 3h6"/><path d="M4 17h7l3-3"/><circle cx="20" cy="10" r="1.4"/><circle cx="17" cy="14" r="1.4"/></svg></div>
+        <h3>Split tunneling</h3>
+        <p>Route only what you need and bypass traffic by country with an on-device GeoIP set.</p>
+      </div>
+      <div class="card">
+        <div class="ic"><svg viewBox="0 0 24 24"><path d="M12 3 3 8l9 5 9-5-9-5Z"/><path d="M3 13l9 5 9-5"/></svg></div>
+        <h3>Multiple profiles</h3>
+        <p>Store several servers and switch between them — or import one by scanning a QR code.</p>
+      </div>
+      <div class="card">
+        <div class="ic"><svg viewBox="0 0 24 24"><path d="M3 12s3-7 9-7 9 7 9 7-3 7-9 7-9-7-9-7Z"/><path d="M4 4l16 16"/></svg></div>
+        <h3>Traffic obfuscation</h3>
+        <p>Optional QUIC/HTTP-3 or Base64 shaping so datagrams blend in with ordinary traffic.</p>
+      </div>
+      <div class="card">
+        <div class="ic"><svg viewBox="0 0 24 24"><rect x="7" y="2" width="10" height="20" rx="2.5"/><path d="M11 18h2"/></svg></div>
+        <h3>On-device only</h3>
+        <p>Your keys and configuration never leave the device. No accounts, no servers of ours.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="screens">
+  <div class="wrap">
+    <p class="eyebrow">A look inside</p>
+    <h2>Native, and out of your way</h2>
+    <p class="lead">Connect from the Home tab, manage servers in Profiles, tune routing in Settings, and watch the live engine log.</p>
+    <div class="shots">
+      <figure class="shot"><img src="assets/screenshots/iphone_1_home.png" alt="Home — connection toggle and live traffic" /><span>Home &amp; live traffic</span></figure>
+      <figure class="shot"><img src="assets/screenshots/iphone_2_profiles.png" alt="Profiles — manage and scan servers" /><span>Profiles &amp; QR import</span></figure>
+      <figure class="shot"><img src="assets/screenshots/iphone_3_settings.png" alt="Settings — routing, cipher, obfuscation" /><span>Routing &amp; ciphers</span></figure>
+      <figure class="shot"><img src="assets/screenshots/iphone_4_logs.png" alt="Logs — live engine output" /><span>Live engine log</span></figure>
+    </div>
+  </div>
+</section>
+
+<section id="start">
+  <div class="wrap">
+    <p class="eyebrow">Get started</p>
+    <h2>Three steps to a private tunnel</h2>
+    <p class="lead">ShadowVPN is bring-your-own-server: run the open-source ShadowVPN server, then point the app at it.</p>
+    <div class="steps">
+      <div class="step">
+        <div class="n"></div>
+        <h3>Run a server</h3>
+        <p>Deploy the open-source <a href="https://github.com/madeye/shadowvpn" style="color:var(--teal-soft)">ShadowVPN server</a> on any VPS, with a password and cipher.</p>
+      </div>
+      <div class="step">
+        <div class="n"></div>
+        <h3>Add a profile</h3>
+        <p>Install the beta, then enter your server details — or scan a <code>shadowvpn://</code> QR code to import it instantly.</p>
+      </div>
+      <div class="step">
+        <div class="n"></div>
+        <h3>Connect</h3>
+        <p>Flip the toggle. iOS asks once to add the VPN configuration, and you're tunneling.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="band">
+  <div class="wrap">
+    <p class="eyebrow">Public beta</p>
+    <h2>Try ShadowVPN on TestFlight</h2>
+    <p class="lead" style="margin-left:auto;margin-right:auto">Open the link on your iPhone or iPad to install the latest build through Apple TestFlight.</p>
+    <div class="cta">
+      <a class="btn btn-primary" href="https://testflight.apple.com/join/anD9vU5M">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2 3 7v6c0 5 3.8 8.4 9 9 5.2-.6 9-4 9-9V7l-9-5Z"/></svg>
+        Join the TestFlight beta
+      </a>
+    </div>
+    <p class="qr" style="margin-top:18px">testflight.apple.com/join/anD9vU5M</p>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <span class="brand"><img src="assets/icon.png" alt="" style="width:24px;height:24px;border-radius:7px"/> ShadowVPN</span>
+    <span class="spacer"></span>
+    <a href="https://github.com/madeye/shadowvpn-ios">GitHub</a>
+    <a href="https://github.com/madeye/shadowvpn-ios#privacy">Privacy</a>
+    <a href="https://github.com/madeye/shadowvpn-ios/blob/main/LICENSE">License</a>
+    <a href="https://testflight.apple.com/join/anD9vU5M">Beta</a>
+  </div>
+  <p class="disc">ShadowVPN is an open-source, self-hosted VPN client. You provide your own server; no traffic is routed through the developer and no account is required. Not affiliated with Apple Inc. “TestFlight” is a trademark of Apple Inc.</p>
+</footer>
+
+</body>
+</html>
