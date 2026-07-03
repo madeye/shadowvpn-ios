@@ -8,13 +8,15 @@ optional ChinaDNS split) lives in a small Rust core wrapped as
 
 See [`DESIGN.md`](DESIGN.md) for the full blueprint.
 
-## Public beta
+## Get the app
 
-ShadowVPN is in open **TestFlight** beta — install it on your iPhone or iPad:
+ShadowVPN is on the **App Store** — install it on your iPhone or iPad:
 
-[![Join the TestFlight beta](https://img.shields.io/badge/TestFlight-Join%20the%20beta-35dcc8?logo=apple&logoColor=white)](https://testflight.apple.com/join/anD9vU5M)
+[![Download on the App Store](https://img.shields.io/badge/App%20Store-Download-35dcc8?logo=apple&logoColor=white)](https://apps.apple.com/us/app/shadowvpn-fast-proxy/id6782243270)
+[![Join the TestFlight beta](https://img.shields.io/badge/TestFlight-Join%20the%20beta-2f74e6?logo=apple&logoColor=white)](https://testflight.apple.com/join/anD9vU5M)
 
-- **Beta:** <https://testflight.apple.com/join/anD9vU5M>
+- **App Store:** <https://apps.apple.com/us/app/shadowvpn-fast-proxy/id6782243270>
+- **Beta (TestFlight):** <https://testflight.apple.com/join/anD9vU5M>
 - **Landing page:** <https://madeye.github.io/shadowvpn-ios/> (served from [`docs/`](docs/))
 
 It's bring-your-own-server: run the open-source
