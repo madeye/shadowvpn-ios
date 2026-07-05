@@ -20,6 +20,13 @@ static os_log_t gLog;
 // handoff emits several updates) without stacking restarts, short enough that a
 // genuine path change recovers the tunnel quickly.
 static const NSTimeInterval kEngineRestartDebounceS = 3.0;
+// Backoff for wake/path restarts that fail while iOS is still bringing DNS or
+// the physical network back. A failed rebind should not tear the VPN profile
+// down; keep the provider reasserting and retry until a newer path/stop event
+// supersedes the generation.
+static const NSTimeInterval kEngineRestartRetryBaseS = 5.0;
+static const NSTimeInterval kEngineRestartRetryMaxS = 30.0;
+static NSString * const kServerIPCacheFile = @"server-ip-cache.json";
 
 @implementation PacketTunnelProvider {
     SVTunnelEngine     *_engine;
@@ -42,6 +49,7 @@ static const NSTimeInterval kEngineRestartDebounceS = 3.0;
     // still current when the window elapses, so a burst of path changes collapses
     // to a single restart after things settle.
     _Atomic uint64_t    _restartGeneration;
+    _Atomic uint32_t    _restartRetryAttempt;
     // Bumped whenever the path monitor starts or stops. Path callbacks capture it
     // so a canceled monitor can't schedule a delayed restart for a later tunnel
     // generation.
@@ -70,6 +78,7 @@ static const NSTimeInterval kEngineRestartDebounceS = 3.0;
         _engineControlQueue = dispatch_queue_create(
             "com.tangzixiang.shadowvpn.PacketTunnel.engine-control", attr);
         atomic_init(&_restartGeneration, 0);
+        atomic_init(&_restartRetryAttempt, 0);
         atomic_init(&_pathGeneration, 0);
     }
     return self;
@@ -122,13 +131,13 @@ static const NSTimeInterval kEngineRestartDebounceS = 3.0;
     // Resolve the server host to dotted IPv4 literal(s) BEFORE building the core
     // config. iOS rejects a bare hostname as the tunnel remote address, and the
     // resolved IPs double as the /32 server-bypass routes so the core's carrier
-    // socket doesn't loop. Fall back to the raw host if resolution fails (the
-    // engine start will then surface the real reachability error).
+    // socket doesn't loop. When a prior live resolve exists, we can fall back to
+    // that cached IP during a wake/on-demand restart where DNS is not ready yet.
     NSString *serverHost = [self hostFromHostPort:server];
-    NSArray<NSString *> *serverIPs = [self resolveIPv4ForHost:serverHost];
+    NSArray<NSString *> *serverIPs = [self serverIPv4AddressesForHost:serverHost];
     NSString *remoteAddress = serverIPs.firstObject ?: serverHost;
     if (serverIPs.count == 0) {
-        SVEngineLogf(SVLogError, @"NE: could not resolve server host %@ to an IPv4 address", serverHost);
+        SVEngineLogf(SVLogError, @"NE: no IPv4 address available for server host %@", serverHost);
     }
 
     // Pin the core's carrier endpoint to the resolved IP (host:port -> ip:port)
@@ -221,6 +230,7 @@ static const NSTimeInterval kEngineRestartDebounceS = 3.0;
     // Invalidate any pending debounced restart before tearing down.
     atomic_fetch_add_explicit(&_restartGeneration, 1, memory_order_relaxed);
     dispatch_async(_engineControlQueue, ^{
+        self.reasserting = NO;
         [self stopPathMonitor];
         SVTunnelEngine *engine = self->_engine;
         self->_engine = nil;
@@ -261,11 +271,29 @@ static const NSTimeInterval kEngineRestartDebounceS = 3.0;
 // MARK: - Debounced restart
 
 - (void)scheduleEngineRestartForReason:(NSString *)reason {
+    atomic_store_explicit(&_restartRetryAttempt, 0, memory_order_relaxed);
+    [self scheduleEngineRestartForReason:reason delay:kEngineRestartDebounceS];
+}
+
+- (void)scheduleEngineRestartRetryForReason:(NSString *)reason
+                               errorMessage:(NSString *)errorMessage {
+    uint32_t attempt =
+        atomic_fetch_add_explicit(&_restartRetryAttempt, 1, memory_order_relaxed) + 1;
+    NSTimeInterval delay =
+        MIN(kEngineRestartRetryMaxS, kEngineRestartRetryBaseS * (NSTimeInterval)attempt);
+    os_log_info(gLog, "%{public}@ restart: retry %u in %.0fs", reason, attempt, delay);
+    SVEngineLogf(SVLogInfo, @"NE: %@ restart — retry %u in %.0fs",
+                 reason, attempt, delay);
+    [self writeState:@"connecting" errorMessage:errorMessage];
+    [self scheduleEngineRestartForReason:reason delay:delay];
+}
+
+- (void)scheduleEngineRestartForReason:(NSString *)reason delay:(NSTimeInterval)delay {
     uint64_t gen =
         atomic_fetch_add_explicit(&_restartGeneration, 1, memory_order_relaxed) + 1;
     __weak __typeof__(self) weak = self;
     dispatch_after(
-        dispatch_time(DISPATCH_TIME_NOW, (int64_t)(kEngineRestartDebounceS * NSEC_PER_SEC)),
+        dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)),
         dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
             __strong __typeof__(weak) self = weak;
             if (!self) return;
@@ -278,9 +306,9 @@ static const NSTimeInterval kEngineRestartDebounceS = 3.0;
         });
 }
 
-// Restart the running engine in place. No-op if no engine is running (e.g. a
-// restart raced a stop). Runs on _engineControlQueue so it can't interleave with
-// a user/app stop.
+// Restart the running engine in place. If the previous restart attempt failed
+// after tearing down the old core, start a fresh engine against the same NE flow.
+// Runs on _engineControlQueue so it can't interleave with a user/app stop.
 - (void)restartEngineForGeneration:(uint64_t)gen reason:(NSString *)reason {
     dispatch_async(_engineControlQueue, ^{
         if (atomic_load_explicit(&self->_restartGeneration, memory_order_relaxed) != gen) {
@@ -290,27 +318,49 @@ static const NSTimeInterval kEngineRestartDebounceS = 3.0;
         }
         SVTunnelEngine *engine = self->_engine;
         if (!engine) {
-            os_log_info(gLog, "%{public}@ restart: no engine running, skipping", reason);
-            return;
+            if (!self->_pathMonitor || self->_configJSON.length == 0) {
+                os_log_info(gLog, "%{public}@ restart: no active tunnel, skipping", reason);
+                return;
+            }
+            os_log_info(gLog, "%{public}@ restart: starting fresh engine", reason);
+            SVEngineLogf(SVLogInfo, @"NE: %@ restart — starting fresh engine", reason);
         }
 
+        self.reasserting = YES;
         NSError *startErr = nil;
-        if (![engine restartWithError:&startErr]) {
+        BOOL ok = engine
+            ? [engine restartWithError:&startErr]
+            : [self startFreshEngineWithError:&startErr];
+        if (!ok) {
+            NSString *message = startErr.localizedDescription ?: @"engine restart failed";
             os_log_error(gLog, "%{public}@ restart: engine start failed: %{public}@",
-                         reason, startErr.localizedDescription);
+                         reason, message);
             SVEngineLogf(SVLogError, @"NE: %@ restart — engine start failed: %@",
-                         reason, startErr.localizedDescription);
+                         reason, message);
             self->_engine = nil;
-            [self writeState:@"error" errorMessage:startErr.localizedDescription];
-            // A failed restart leaves no working data path. Tear the tunnel down
-            // so NE on-demand / the app can re-establish cleanly rather than
-            // sitting connected-but-dead.
-            [self cancelTunnelWithError:startErr];
+            // A wake/path rebind can fail transiently while iOS is still
+            // restoring reachability. Keep the NE profile alive and retry; a
+            // user stop or newer path event invalidates the generation.
+            [self scheduleEngineRestartRetryForReason:reason
+                                         errorMessage:message];
             return;
         }
+        self.reasserting = NO;
+        atomic_store_explicit(&self->_restartRetryAttempt, 0, memory_order_relaxed);
         os_log_info(gLog, "%{public}@ restart: engine restarted", reason);
         SVEngineLogf(SVLogInfo, @"NE: %@ restart — engine restarted", reason);
+        [self writeState:@"connected" errorMessage:nil];
     });
+}
+
+- (BOOL)startFreshEngineWithError:(NSError **)error {
+    SVTunnelEngine *engine = [[SVTunnelEngine alloc] initWithPacketFlow:self.packetFlow
+                                                            configJSON:_configJSON];
+    if (![engine startWithError:error]) {
+        return NO;
+    }
+    _engine = engine;
+    return YES;
 }
 
 // MARK: - State
@@ -324,9 +374,12 @@ static const NSTimeInterval kEngineRestartDebounceS = 3.0;
     else              [state removeObjectForKey:@"message"];
     if ([stage isEqualToString:@"connected"]) {
         // VpnState.startedAt is a Date decoded with `.secondsSince1970`; write a
-        // numeric epoch-seconds value to match the Swift decoder.
-        state[@"startedAt"] = @([[NSDate date] timeIntervalSince1970]);
-    } else {
+        // numeric epoch-seconds value to match the Swift decoder. Preserve it
+        // across wake/path rebinds so uptime reflects the user-visible session.
+        if (!state[@"startedAt"]) {
+            state[@"startedAt"] = @([[NSDate date] timeIntervalSince1970]);
+        }
+    } else if (![stage isEqualToString:@"connecting"] || errorMessage.length == 0) {
         [state removeObjectForKey:@"startedAt"];
     }
     NSError *err = nil;
@@ -622,6 +675,24 @@ static const NSTimeInterval kEngineRestartDebounceS = 3.0;
     return [hostPort substringFromIndex:colon.location + 1];
 }
 
+- (NSArray<NSString *> *)serverIPv4AddressesForHost:(NSString *)host {
+    NSArray<NSString *> *resolved = [self resolveIPv4ForHost:host];
+    if (resolved.count > 0) {
+        [self writeCachedServerIPs:resolved forHost:host];
+        return resolved;
+    }
+
+    NSArray<NSString *> *cached = [self cachedServerIPsForHost:host];
+    if (cached.count > 0) {
+        os_log_info(gLog, "resolve %{public}@ failed; using cached IPv4 %{public}@",
+                    host, [cached componentsJoinedByString:@","]);
+        SVEngineLogf(SVLogInfo, @"NE: using cached server IPv4 for %@: %@",
+                     host, [cached componentsJoinedByString:@","]);
+        return cached;
+    }
+    return @[];
+}
+
 // Resolve a host to its dotted-IPv4 address(es). Returns a de-duplicated list in
 // resolver order, or an empty array if resolution fails. If `host` is already a
 // dotted-IPv4 literal it is returned as-is without a lookup. Synchronous
@@ -659,6 +730,72 @@ static const NSTimeInterval kEngineRestartDebounceS = 3.0;
     }
     freeaddrinfo(results);
     return ips;
+}
+
+- (NSURL *)serverIPCacheURL {
+    return [[SVAppGroup containerURL] URLByAppendingPathComponent:kServerIPCacheFile];
+}
+
+- (nullable NSMutableDictionary *)readServerIPCache {
+    NSData *data = [NSData dataWithContentsOfURL:[self serverIPCacheURL]];
+    if (!data) return [NSMutableDictionary dictionary];
+    id obj = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+    if ([obj isKindOfClass:[NSDictionary class]]) {
+        return [(NSDictionary *)obj mutableCopy];
+    }
+    return [NSMutableDictionary dictionary];
+}
+
+- (NSArray<NSString *> *)cachedServerIPsForHost:(NSString *)host {
+    if (host.length == 0) return @[];
+    NSDictionary *cache = [self readServerIPCache] ?: @{};
+    id value = cache[host.lowercaseString] ?: cache[host];
+    if (![value isKindOfClass:[NSArray class]]) return @[];
+
+    NSMutableArray<NSString *> *valid = [NSMutableArray array];
+    for (id item in (NSArray *)value) {
+        if (![item isKindOfClass:[NSString class]]) continue;
+        NSString *ip = (NSString *)item;
+        struct in_addr literal;
+        if (inet_pton(AF_INET, ip.UTF8String, &literal) == 1 &&
+            ![valid containsObject:ip]) {
+            [valid addObject:ip];
+        }
+    }
+    return valid;
+}
+
+- (void)writeCachedServerIPs:(NSArray<NSString *> *)ips forHost:(NSString *)host {
+    if (host.length == 0 || ips.count == 0) return;
+
+    NSMutableArray<NSString *> *valid = [NSMutableArray array];
+    for (NSString *ip in ips) {
+        struct in_addr literal;
+        if (inet_pton(AF_INET, ip.UTF8String, &literal) == 1 &&
+            ![valid containsObject:ip]) {
+            [valid addObject:ip];
+        }
+    }
+    if (valid.count == 0) return;
+
+    NSMutableDictionary *cache = [self readServerIPCache] ?: [NSMutableDictionary dictionary];
+    cache[host.lowercaseString] = valid;
+
+    NSURL *url = [self serverIPCacheURL];
+    NSError *err = nil;
+    if (![[NSFileManager defaultManager] createDirectoryAtURL:url.URLByDeletingLastPathComponent
+                                  withIntermediateDirectories:YES
+                                                   attributes:nil
+                                                        error:&err]) {
+        os_log_error(gLog, "server IP cache mkdir failed: %{public}@",
+                     err.localizedDescription);
+        return;
+    }
+    NSData *data = [NSJSONSerialization dataWithJSONObject:cache options:0 error:&err];
+    if (!data || ![data writeToURL:url options:NSDataWritingAtomic error:&err]) {
+        os_log_error(gLog, "server IP cache write failed: %{public}@",
+                     err.localizedDescription);
+    }
 }
 
 @end
