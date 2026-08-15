@@ -11,6 +11,7 @@ typedef NS_ENUM(NSUInteger, SVNotification) {
     SVNotificationCommand,
     SVNotificationState,
     SVNotificationTraffic,
+    SVNotificationDiagnostics,
 };
 
 /// A live registration with the Darwin notify center. Retain it for as long as

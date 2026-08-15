@@ -1,3 +1,4 @@
+import SVPNIPC
 import SVPNModels
 import SwiftUI
 
@@ -19,8 +20,18 @@ struct LogsView: View {
     /// fast enough that a fresh connect/disconnect shows up promptly.
     private static let refreshInterval: TimeInterval = 2
 
+    /// How long one flow-diagnostics opt-in lasts. Long enough to reproduce a
+    /// connectivity problem, short enough that a forgotten toggle can't build
+    /// a browsing-history record.
+    private static let diagnosticsWindow: TimeInterval = 15 * 60
+
     @State private var lines: [LogLine] = []
     @State private var isEmpty = true
+    /// Epoch deadline of the current flow-diagnostics window; nil/past = off.
+    /// Mirrors the shared-defaults value the tunnel extension reads.
+    @State private var diagnosticsUntil: Date?
+    /// Drives the opt-in confirmation dialog for arming flow diagnostics.
+    @State private var confirmDiagnostics = false
     /// Drives the periodic re-read; only fires while the view is visible.
     @State private var ticker = Timer.publish(
         every: refreshInterval,
@@ -30,6 +41,30 @@ struct LogsView: View {
 
     var body: some View {
         ScrollViewReader { proxy in
+            VStack(spacing: 0) {
+                if diagnosticsActive {
+                    diagnosticsBanner
+                }
+                logScroll(proxy)
+            }
+        }
+        .navigationTitle("logs.nav.title")
+        .toolbar { toolbarContent }
+        .onAppear {
+            reload()
+            refreshDiagnosticsState()
+            // Restart the publisher each time the tab becomes visible so we're
+            // not burning a timer while the user sits on Home or Settings.
+            ticker = Timer.publish(every: Self.refreshInterval, on: .main, in: .common)
+                .autoconnect()
+        }
+        .onReceive(ticker) { _ in
+            reload()
+            refreshDiagnosticsState()
+        }
+    }
+
+    private func logScroll(_ proxy: ScrollViewProxy) -> some View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     if isEmpty {
@@ -58,17 +93,65 @@ struct LogsView: View {
                     proxy.scrollTo(Self.bottomAnchor, anchor: .bottom)
                 }
             }
+    }
+
+    // MARK: - Flow diagnostics (#18)
+
+    private var diagnosticsActive: Bool {
+        if let until = diagnosticsUntil { return until > .now }
+        return false
+    }
+
+    /// Banner shown while a diagnostics window is armed, so recording browsing
+    /// destinations is never invisible. Offers the stop action inline.
+    private var diagnosticsBanner: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "record.circle.fill")
+                .foregroundStyle(AppTheme.danger)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("logs.diagnostics.active.title")
+                    .font(.subheadline.weight(.semibold))
+                if let until = diagnosticsUntil {
+                    Text(until, style: .timer)
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Spacer()
+            Button("logs.diagnostics.stop") { toggleDiagnostics() }
+                .font(.subheadline.weight(.semibold))
+                .accessibilityIdentifier("logs.diagnostics.stop")
         }
-        .navigationTitle("logs.nav.title")
-        .toolbar { toolbarContent }
-        .onAppear {
-            reload()
-            // Restart the publisher each time the tab becomes visible so we're
-            // not burning a timer while the user sits on Home or Settings.
-            ticker = Timer.publish(every: Self.refreshInterval, on: .main, in: .common)
-                .autoconnect()
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(AppTheme.danger.opacity(0.12))
+        .accessibilityIdentifier("logs.diagnostics.banner")
+    }
+
+    private func refreshDiagnosticsState() {
+        let until = AppGroup.defaults.double(forKey: AppGroup.flowDiagnosticsUntilKey)
+        diagnosticsUntil = until > Date.now.timeIntervalSince1970
+            ? Date(timeIntervalSince1970: until)
+            : nil
+    }
+
+    /// Arm or disarm the shared flow-diagnostics window and nudge the
+    /// extension. The write-then-post order matters: the notification is only
+    /// a "go read the container" signal.
+    private func toggleDiagnostics() {
+        if diagnosticsActive {
+            AppGroup.defaults.set(0.0, forKey: AppGroup.flowDiagnosticsUntilKey)
+            diagnosticsUntil = nil
+        } else {
+            let until = Date.now.addingTimeInterval(Self.diagnosticsWindow)
+            AppGroup.defaults.set(
+                until.timeIntervalSince1970,
+                forKey: AppGroup.flowDiagnosticsUntilKey,
+            )
+            diagnosticsUntil = until
         }
-        .onReceive(ticker) { _ in reload() }
+        DarwinBridge.post(.diagnostics)
     }
 
     // MARK: - Empty state
@@ -98,6 +181,33 @@ struct LogsView: View {
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
         ToolbarItemGroup(placement: .topBarTrailing) {
+            // Arming flow diagnostics is explicit and confirmed: the dialog
+            // spells out that destination hostnames will be written to this
+            // shareable log for the next window, then auto-stop.
+            Button {
+                if diagnosticsActive {
+                    toggleDiagnostics()
+                } else {
+                    confirmDiagnostics = true
+                }
+            } label: {
+                Image(systemName: diagnosticsActive ? "record.circle.fill" : "record.circle")
+                    .foregroundStyle(diagnosticsActive ? AnyShapeStyle(AppTheme.danger)
+                                                       : AnyShapeStyle(.tint))
+            }
+            .accessibilityLabel("logs.diagnostics.start")
+            .accessibilityIdentifier("logs.action.diagnostics")
+            .confirmationDialog(
+                "logs.diagnostics.confirm.title",
+                isPresented: $confirmDiagnostics,
+                titleVisibility: .visible,
+            ) {
+                Button("logs.diagnostics.confirm.start") { toggleDiagnostics() }
+                Button("logs.diagnostics.confirm.cancel", role: .cancel) {}
+            } message: {
+                Text("logs.diagnostics.confirm.message")
+            }
+
             if !isEmpty {
                 // Share the full file (not just the rendered tail) so a bug
                 // report carries the complete current segment.

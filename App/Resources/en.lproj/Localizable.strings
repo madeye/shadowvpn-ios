@@ -112,3 +112,10 @@
 "logs.empty" = "No logs yet";
 "logs.empty.title" = "No logs yet";
 "logs.empty.subtitle" = "Connect the tunnel to start collecting logs.";
+"logs.diagnostics.start" = "Capture flow details";
+"logs.diagnostics.stop" = "Stop";
+"logs.diagnostics.active.title" = "Recording flow details";
+"logs.diagnostics.confirm.title" = "Capture flow details?";
+"logs.diagnostics.confirm.message" = "For the next 15 minutes the log will record the destination of each connection (DNS names, TLS server names, HTTP hosts). This browsing detail stays on your device in this log until you clear it, and is included if you share the log. Recording stops automatically.";
+"logs.diagnostics.confirm.start" = "Capture for 15 minutes";
+"logs.diagnostics.confirm.cancel" = "Cancel";

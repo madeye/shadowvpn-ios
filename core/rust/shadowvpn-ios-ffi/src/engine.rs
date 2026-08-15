@@ -367,7 +367,21 @@ pub fn is_running() -> bool {
 /// Queue a raw IP packet from `NEPacketTunnelFlow.readPackets`. Non-blocking;
 /// drops under backpressure (returns 0 — a dropped packet is not an error from
 /// Swift's perspective). Returns -1 only when the data plane isn't running.
+/// True for a packet whose IP version nibble says IPv4. The tunnel is
+/// IPv4-only; the NE claims the IPv6 default route purely as a blackhole so
+/// dual-stack apps can't bypass the VPN over native v6 (#17). Those v6 packets
+/// arrive here and must be dropped — silently (no per-packet logging), and
+/// before the v4-only server ever sees them.
+fn is_ipv4_packet(packet: &[u8]) -> bool {
+    packet.first().is_some_and(|b| b >> 4 == 4)
+}
+
 pub fn ingest(packet: &[u8]) -> i32 {
+    // Blackholed address families (IPv6) end here by design; "accepted and
+    // dropped" is the success path for them.
+    if !is_ipv4_packet(packet) {
+        return 0;
+    }
     let Some(tx) = session_slot().lock().as_ref().map(|s| s.ingest_tx.clone()) else {
         return -1;
     };
@@ -406,10 +420,15 @@ async fn ingress_loop(
     obfuscator: Option<Arc<Obfuscator>>,
 ) {
     while let Some(pkt) = rx.recv().await {
-        // Surface the flow's destination (DNS name / TLS SNI / HTTP Host) in the
-        // app's Log view. Passive and best-effort; never affects forwarding.
-        if let Some(info) = crate::inspect::describe(&pkt) {
-            log::info!("flow → {info}");
+        // Surface the flow's destination (DNS name / TLS SNI / HTTP Host) in
+        // the app's Log view — but only inside an explicit, self-expiring
+        // diagnostic window. The mirrored log file persists in the App Group
+        // and is shareable, so inspecting by default would build a durable
+        // browsing-history record (#18). Passive; never affects forwarding.
+        if crate::logging::flow_diagnostics_active() {
+            if let Some(info) = crate::inspect::describe(&pkt) {
+                log::info!("flow → {info}");
+            }
         }
 
         // chinadns mode: an A/IN query to dst port 53 is handled out-of-band by
@@ -552,5 +571,33 @@ async fn keepalive_loop(
             log::warn!("svpn keepalive: send failed, ending keepalive: {e}");
             return;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // #17: with the NE blackholing ::/0, every IPv6 packet the flow hands us
+    // must be dropped at the door — never queued toward the v4-only server.
+    #[test]
+    fn ingest_version_filter_accepts_only_ipv4() {
+        let ipv4_min = [0x45u8, 0, 0, 20];
+        let ipv6_min = [0x60u8, 0, 0, 0];
+        assert!(is_ipv4_packet(&ipv4_min));
+        assert!(!is_ipv4_packet(&ipv6_min));
+        assert!(!is_ipv4_packet(&[]));
+        // Garbage version nibbles are dropped too, not forwarded.
+        assert!(!is_ipv4_packet(&[0x00, 0x45]));
+        assert!(!is_ipv4_packet(&[0xf5]));
+    }
+
+    // A blackholed (non-IPv4) packet is "handled" even with no session
+    // running: it must report success without touching the ingest queue,
+    // while an IPv4 packet with no session correctly reports -1.
+    #[test]
+    fn ingest_drops_ipv6_before_session_lookup() {
+        assert_eq!(ingest(&[0x60, 0, 0, 0]), 0);
+        assert_eq!(ingest(&[0x45, 0, 0, 20]), -1);
     }
 }

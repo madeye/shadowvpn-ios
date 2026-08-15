@@ -48,6 +48,14 @@ public enum AppGroup {
         containerURL.appending(path: "cidr-cache")
     }
 
+    /// Shared-defaults key holding the flow-diagnostics deadline (epoch
+    /// seconds, `Double`). While the deadline is in the future the tunnel logs
+    /// per-flow destinations (DNS name / TLS SNI / HTTP host) for debugging;
+    /// past or absent means ordinary operation never records them. The app
+    /// writes it and posts ``SVPNNotification/diagnostics``; the extension
+    /// reads it. Must match `kFlowDiagnosticsUntilKey` in the ObjC provider.
+    public static let flowDiagnosticsUntilKey = "flowDiagnosticsUntil"
+
     /// UserDefaults suite shared between app and extension. Force-unwrap is safe
     /// once entitlements are wired — a missing suite indicates a config bug that
     /// should fail loudly.

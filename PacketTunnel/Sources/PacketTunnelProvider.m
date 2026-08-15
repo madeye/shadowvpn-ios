@@ -28,9 +28,18 @@ static const NSTimeInterval kEngineRestartRetryBaseS = 5.0;
 static const NSTimeInterval kEngineRestartRetryMaxS = 30.0;
 static NSString * const kServerIPCacheFile = @"server-ip-cache.json";
 
+// Shared-defaults key holding the flow-diagnostics deadline as epoch seconds
+// (double). Written by the app's Logs screen, read here on start and on every
+// diagnostics Darwin notification. Must match AppGroup.flowDiagnosticsUntilKey.
+static NSString * const kFlowDiagnosticsUntilKey = @"flowDiagnosticsUntil";
+// Hard cap on a single opt-in window; the Rust side self-expires at the
+// deadline, this just bounds a corrupt/hand-edited value.
+static const NSTimeInterval kFlowDiagnosticsMaxWindowS = 3600.0;
+
 @implementation PacketTunnelProvider {
     SVTunnelEngine     *_engine;
     SVIPCListener      *_ipcListener;
+    SVDarwinObserver   *_diagObserver;
 
     nw_path_monitor_t   _pathMonitor;
     dispatch_queue_t    _pathQueue;
@@ -215,12 +224,35 @@ static NSString * const kServerIPCacheFile = @"server-ip-cache.json";
             [listener start];
             self->_ipcListener = listener;
 
+            // Flow-detail diagnostics (#18): apply any window the app already
+            // armed, and re-read the shared deadline whenever the Logs screen
+            // toggles it. Off by default; the Rust core self-expires it.
+            [self applyFlowDiagnosticsFromSharedStore];
+            self->_diagObserver = [SVDarwinBridge observe:SVNotificationDiagnostics handler:^{
+                __strong __typeof__(weak) self = weak;
+                if (self) [self applyFlowDiagnosticsFromSharedStore];
+            }];
+
             [self startPathMonitor];
 
             [self writeState:@"connected" errorMessage:nil];
             completionHandler(nil);
         });
     }];
+}
+
+// Translate the shared flow-diagnostics deadline into a remaining-seconds
+// window for the core. A missing/expired deadline disables inspection; the
+// window is clamped so a bogus stored value can't arm diagnostics for days.
+- (void)applyFlowDiagnosticsFromSharedStore {
+    double until = [SVAppGroup.defaults doubleForKey:kFlowDiagnosticsUntilKey];
+    NSTimeInterval remaining = until - NSDate.date.timeIntervalSince1970;
+    uint32_t secs = 0;
+    if (remaining > 0) {
+        secs = (uint32_t)MIN(remaining, kFlowDiagnosticsMaxWindowS);
+    }
+    svpn_core_set_flow_diagnostics(secs);
+    os_log_info(gLog, "flow diagnostics window: %u s", secs);
 }
 
 - (void)stopTunnelWithReason:(NEProviderStopReason)reason
@@ -238,6 +270,9 @@ static NSString * const kServerIPCacheFile = @"server-ip-cache.json";
         SVIPCListener *listener = self->_ipcListener;
         self->_ipcListener = nil;
         [listener stop];
+        SVDarwinObserver *diag = self->_diagObserver;
+        self->_diagObserver = nil;
+        if (diag) [SVDarwinBridge remove:diag];
         [self writeState:@"disconnected" errorMessage:nil];
         completionHandler();
     });
