@@ -12,6 +12,9 @@ public enum SVPNNotification: String, Sendable {
     case state = "com.tangzixiang.shadowvpn.state"
     /// The extension wrote a fresh ``TrafficSnapshot`` to `traffic.json`.
     case traffic = "com.tangzixiang.shadowvpn.traffic"
+    /// The app changed the flow-diagnostics window (shared-defaults key
+    /// ``AppGroup/flowDiagnosticsUntilKey``); the extension re-reads it.
+    case diagnostics = "com.tangzixiang.shadowvpn.diagnostics"
 
     public var cfName: CFNotificationName {
         CFNotificationName(rawValue as CFString)

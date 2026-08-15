@@ -112,3 +112,10 @@
 "logs.empty" = "暂无日志";
 "logs.empty.title" = "暂无日志";
 "logs.empty.subtitle" = "连接隧道后开始收集日志。";
+"logs.diagnostics.start" = "记录连接详情";
+"logs.diagnostics.stop" = "停止";
+"logs.diagnostics.active.title" = "正在记录连接详情";
+"logs.diagnostics.confirm.title" = "记录连接详情？";
+"logs.diagnostics.confirm.message" = "在接下来的 15 分钟内，日志将记录每个连接的目标（DNS 域名、TLS 服务器名、HTTP 主机名）。这些浏览信息只保存在本机日志中，清除前一直保留；分享日志时会包含在内。到时后自动停止记录。";
+"logs.diagnostics.confirm.start" = "记录 15 分钟";
+"logs.diagnostics.confirm.cancel" = "取消";

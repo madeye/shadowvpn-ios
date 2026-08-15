@@ -129,6 +129,16 @@ pub unsafe extern "C" fn svpn_core_set_home_dir(dir: *const c_char) {
     logging::bridge_log(&format!("svpn_core_set_home_dir: {parsed:?}"));
 }
 
+/// Enable flow-detail diagnostics — per-destination lines (DNS name / TLS SNI
+/// / HTTP Host) in the shared log — for `secs` seconds from now; `0` disables
+/// immediately. Off by default: ordinary operation never inspects packets or
+/// persists browsing metadata, and the window self-expires with no further
+/// call required. Safe to call at any time, before or during a session.
+#[no_mangle]
+pub extern "C" fn svpn_core_set_flow_diagnostics(secs: u32) {
+    logging::set_flow_diagnostics_secs(secs);
+}
+
 /// Return the last error message for the calling thread. The pointer is owned
 /// by the crate and valid until the next error is set on the same thread — copy
 /// immediately if retention is needed.

@@ -16,6 +16,7 @@
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, Once, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -31,6 +32,46 @@ const OSLOG_SUBSYSTEM: &str = "com.tangzixiang.shadowvpn.PacketTunnel";
 
 /// Rotate the mirrored log file to `<name>.1` once it grows past this.
 const MAX_LOG_BYTES: u64 = 512 * 1024;
+
+/// Marker file (in the `logs/` dir) recording that the one-time purge of
+/// pre-privacy-fix log files has run. Logs written before flow-detail logging
+/// became opt-in (#18) contain DNS names / TLS SNI / HTTP hosts, so the first
+/// launch of a build with this code deletes the current and rotated files
+/// instead of carrying that browsing history forward.
+const PURGE_MARKER: &str = ".flow-history-purged-v1";
+
+/// Flow-detail diagnostics deadline, epoch seconds. `0` = disabled (the
+/// default). Ingress only inspects and logs per-flow destinations (DNS name /
+/// TLS SNI / HTTP host) while `now < deadline`, so the mode self-expires
+/// without a timer (#18).
+static FLOW_DIAG_UNTIL: AtomicU64 = AtomicU64::new(0);
+
+fn now_epoch_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+/// Enable flow-detail diagnostics for `secs` seconds from now; `0` disables
+/// immediately. Called from `svpn_core_set_flow_diagnostics`.
+pub fn set_flow_diagnostics_secs(secs: u32) {
+    if secs == 0 {
+        FLOW_DIAG_UNTIL.store(0, Ordering::Relaxed);
+        log::info!("flow diagnostics off");
+    } else {
+        let until = now_epoch_secs().saturating_add(u64::from(secs));
+        FLOW_DIAG_UNTIL.store(until, Ordering::Relaxed);
+        log::info!("flow diagnostics on for {secs}s");
+    }
+}
+
+/// Whether the ingress loop should inspect packets and log flow destinations.
+/// False once the opt-in window has elapsed.
+pub fn flow_diagnostics_active() -> bool {
+    let until = FLOW_DIAG_UNTIL.load(Ordering::Relaxed);
+    until != 0 && now_epoch_secs() < until
+}
 
 /// Append handle for the shared log file, installed by [`set_log_file`]. `None`
 /// until the host sets the home dir.
@@ -110,6 +151,7 @@ pub fn set_log_file(home_dir: &str) {
     if fs::create_dir_all(&dir).is_err() {
         return;
     }
+    purge_pre_privacy_logs(&dir);
     let path = dir.join("svpn-tunnel.log");
     if let Ok(meta) = fs::metadata(&path) {
         if meta.len() > MAX_LOG_BYTES {
@@ -124,6 +166,21 @@ pub fn set_log_file(home_dir: &str) {
         }
         Err(e) => eprintln!("svpn log file open failed: {e}"),
     }
+}
+
+/// One-time deletion of log files written before flow-detail logging became
+/// opt-in (#18): those files can contain a browsing-history record (DNS / SNI /
+/// HTTP hosts logged at info by default), so the first run of a fixed build
+/// deletes the current and rotated files rather than carrying them forward.
+/// Idempotent via a marker file in the same directory.
+fn purge_pre_privacy_logs(dir: &Path) {
+    let marker = dir.join(PURGE_MARKER);
+    if marker.exists() {
+        return;
+    }
+    let _ = fs::remove_file(dir.join("svpn-tunnel.log"));
+    let _ = fs::remove_file(dir.join("svpn-tunnel.log.1"));
+    let _ = File::create(&marker);
 }
 
 /// Emit an internal lifecycle line at `info` level (so it reaches both os_log
@@ -162,4 +219,57 @@ pub fn install_panic_hook() {
             default_hook(info);
         }));
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// One test drives the whole enable → expire → disable sequence because
+    /// `FLOW_DIAG_UNTIL` is process-global; separate `#[test]` fns would race.
+    #[test]
+    fn flow_diagnostics_default_off_opt_in_and_expiring() {
+        // Default: off — ordinary traffic must not be inspected (#18).
+        assert!(!flow_diagnostics_active());
+
+        // Explicit opt-in turns it on for the window.
+        set_flow_diagnostics_secs(60);
+        assert!(flow_diagnostics_active());
+
+        // Explicit disable turns it off immediately.
+        set_flow_diagnostics_secs(0);
+        assert!(!flow_diagnostics_active());
+
+        // A deadline in the past reads as expired, without any timer firing.
+        FLOW_DIAG_UNTIL.store(now_epoch_secs().saturating_sub(1), Ordering::Relaxed);
+        assert!(!flow_diagnostics_active());
+        FLOW_DIAG_UNTIL.store(0, Ordering::Relaxed);
+    }
+
+    #[test]
+    fn purge_deletes_old_logs_exactly_once() {
+        let dir = std::env::temp_dir().join(format!(
+            "svpn-purge-test-{}-{}",
+            std::process::id(),
+            now_epoch_secs()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        let current = dir.join("svpn-tunnel.log");
+        let rotated = dir.join("svpn-tunnel.log.1");
+        fs::write(&current, "flow → TLS SNI example.com\n").unwrap();
+        fs::write(&rotated, "flow → DNS A example.org\n").unwrap();
+
+        // First run deletes both files and drops the marker.
+        purge_pre_privacy_logs(&dir);
+        assert!(!current.exists(), "current log must be purged");
+        assert!(!rotated.exists(), "rotated log must be purged");
+        assert!(dir.join(PURGE_MARKER).exists());
+
+        // Later runs leave newly written (post-fix) logs alone.
+        fs::write(&current, "lifecycle line\n").unwrap();
+        purge_pre_privacy_logs(&dir);
+        assert!(current.exists(), "post-purge logs must survive restarts");
+
+        let _ = fs::remove_dir_all(&dir);
+    }
 }

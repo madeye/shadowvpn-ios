@@ -4,9 +4,10 @@
 // Must match SVPNNotification.rawValue in DarwinNotifications.swift.
 static NSString *nameFor(SVNotification n) {
     switch (n) {
-        case SVNotificationCommand: return @"com.tangzixiang.shadowvpn.command";
-        case SVNotificationState:   return @"com.tangzixiang.shadowvpn.state";
-        case SVNotificationTraffic: return @"com.tangzixiang.shadowvpn.traffic";
+        case SVNotificationCommand:     return @"com.tangzixiang.shadowvpn.command";
+        case SVNotificationState:       return @"com.tangzixiang.shadowvpn.state";
+        case SVNotificationTraffic:     return @"com.tangzixiang.shadowvpn.traffic";
+        case SVNotificationDiagnostics: return @"com.tangzixiang.shadowvpn.diagnostics";
     }
 }
 

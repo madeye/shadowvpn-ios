@@ -170,7 +170,10 @@ and must work even if chinadns is simplified.
   log a truncation count — never silently drop.)
 - DNS: `mode==chinadns` → `NEDNSSettings(servers:[dns_local_ip, dns_remote_ip])`
   with `matchDomains:[""]`; else inherit system DNS (no NEDNSSettings) so split
-  routing alone applies. Keep IPv4-only (no IPv6Settings), like meow.
+  routing alone applies. The tunnel carries IPv4 only, but `IPv6Settings` is
+  **not** left nil: the v6 default route is claimed as a blackhole (the core
+  drops non-IPv4 ingest) so dual-stack apps can't bypass the VPN over native
+  IPv6 (#17); link-local `fe80::/10` and multicast `ff00::/8` stay direct.
 
 `chnroute.txt` must be readable by the **extension**: bundle it in the PacketTunnel
 target resources (NE reads its own bundle) AND in the app (for display/staging).

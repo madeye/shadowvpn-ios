@@ -81,10 +81,24 @@ static NSString *const kTunnelSubnetMask     = @"255.255.255.252";  // /30
     ipv4.excludedRoutes = excluded;
     settings.IPv4Settings = ipv4;
 
-    // IPv6 — intentionally left nil (IPv4-only tunnel), matching meow. With no
-    // ::/0 route claimed, native IPv6 traffic could bypass the tunnel; ShadowVPN
-    // accepts that residual surface (the upstream client is IPv4-only too) and
-    // relies on the path monitor's address-family restart to track v4↔v6 shifts.
+    // IPv6 — the tunnel itself is IPv4-only, but leaving IPv6Settings nil lets
+    // dual-stack apps send traffic straight out the physical interface over
+    // native v6 while the app reports "connected" (#17). Claim the v6 default
+    // route as a blackhole instead: v6 packets route into the TUN, the core's
+    // ingest drops every non-IPv4 packet, and applications fall back to IPv4
+    // via Happy Eyeballs rather than leaking. The address is a ULA that never
+    // appears on the wire. Link-local and multicast stay direct so NDP and
+    // local discovery keep working; they never leave the local segment.
+    NEIPv6Settings *ipv6 = [[NEIPv6Settings alloc]
+        initWithAddresses:@[@"fd7a:7376:706e::2"]
+     networkPrefixLengths:@[@64]];
+    ipv6.includedRoutes = @[[NEIPv6Route defaultRoute]];
+    ipv6.excludedRoutes = @[
+        [[NEIPv6Route alloc] initWithDestinationAddress:@"fe80::" networkPrefixLength:@10],
+        [[NEIPv6Route alloc] initWithDestinationAddress:@"ff00::" networkPrefixLength:@8],
+    ];
+    settings.IPv6Settings = ipv6;
+    os_log_info(gLog, "settings: IPv6 default route blackholed (IPv4-only tunnel)");
 
     // DNS. We always install NEDNSSettings and claim every domain ([@""]) so the
     // OS routes ALL lookups to resolvers we control, through the tunnel —
