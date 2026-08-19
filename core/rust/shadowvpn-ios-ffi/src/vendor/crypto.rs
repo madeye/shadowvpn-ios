@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
 //
 // vendored from madeye/shadowvpn (https://github.com/madeye/shadowvpn),
-// synced 2026-07-06 from upstream main @ edb6b8b (body unchanged since the #25
-// in-place AEAD rework at 7571f79; upstream #27-#40 touched only non-vendored
-// client/desktop files), byte-identical except this
+// synced 2026-08-14 from upstream main @ 26005a7 (v0.5.1; rustdoc examples
+// added since edb6b8b; body otherwise unchanged since the #25 in-place AEAD
+// rework at 7571f79), byte-identical except this
 // provenance header. Upstream is MIT-licensed (see that repo's LICENSE). Kept
 // verbatim so it tracks upstream's crypto/DNS wire behavior; edit upstream and
 // re-vendor rather than diverging here.
@@ -90,6 +90,20 @@ pub enum CryptoError {
 /// The set of supported AEAD ciphers.
 ///
 /// Parse one from its shadowsocks name with [`Cipher::from_name`].
+///
+/// ```
+/// use shadowvpn::crypto::Cipher;
+///
+/// assert_eq!(
+///     Cipher::from_name("chacha20-poly1305").unwrap(),
+///     Cipher::ChaCha20Poly1305
+/// );
+/// assert_eq!(
+///     Cipher::from_name("chacha20-ietf-poly1305").unwrap(),
+///     Cipher::ChaCha20Poly1305
+/// );
+/// assert!(Cipher::from_name("rc4").is_err());
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Cipher {
     /// AES-128-GCM. 16-byte key, 16-byte salt.
@@ -241,6 +255,18 @@ fn aead_open_in_place(
 ///   must equal `cipher.key_len()`; this is guaranteed when it is produced by
 ///   [`evp_bytes_to_key`] with the matching length.
 /// * `plaintext` — the raw IP packet (no SOCKS address header).
+///
+/// # Example
+///
+/// ```
+/// use shadowvpn::crypto::{decrypt_packet, encrypt_packet, evp_bytes_to_key, Cipher};
+///
+/// let cipher = Cipher::Aes128Gcm;
+/// let key = evp_bytes_to_key(b"password", cipher.key_len());
+/// let packet = b"\x45\x00\x00\x14........";
+/// let wire = encrypt_packet(cipher, &key, packet).unwrap();
+/// assert_eq!(decrypt_packet(cipher, &key, &wire).unwrap(), packet);
+/// ```
 pub fn encrypt_packet(
     cipher: Cipher,
     master_key: &[u8],

@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: MIT
 //
 // vendored from madeye/shadowvpn (https://github.com/madeye/shadowvpn),
-// synced 2026-07-06 from upstream main @ edb6b8b (this module's body is unchanged
-// since 212e06d/v0.1.1; upstream #25-#40 touched crypto.rs and non-vendored
-// client/desktop files only),
+// synced 2026-08-14 from upstream main @ 26005a7 (v0.5.1; rustdoc example
+// added since edb6b8b; body otherwise unchanged since 212e06d/v0.1.1),
 // unmodified except this provenance header and the `crate::`→`super::`
 // module-path rewrites the vendor layout needs. Upstream is MIT-licensed (see
 // that repo's
@@ -46,6 +45,14 @@ pub const MAX_IP_PACKET: usize = 65535;
 /// the rest of the datagram. There is no nonce on the wire
 /// ([`super::crypto::NONCE_LEN`] bytes of all-zero nonce are implicit), so it
 /// does not appear here.
+///
+/// ```
+/// use shadowvpn::crypto::Cipher;
+/// use shadowvpn::protocol::crypto_overhead;
+///
+/// assert_eq!(crypto_overhead(Cipher::Aes128Gcm), 32); // 16-byte salt + 16-byte tag
+/// assert_eq!(crypto_overhead(Cipher::ChaCha20Poly1305), 48);
+/// ```
 pub fn crypto_overhead(cipher: Cipher) -> usize {
     cipher.salt_len() + TAG_LEN
 }
